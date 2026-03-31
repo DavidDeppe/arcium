@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "vault": {
+      "type": "stdio",
+      "command": "/Users/daviddeppe/miniforge3/bin/poetry",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "arcium.vault.server"
+      ],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "arcium"
+version = "0.1.0"
+description = "Arcium - Internal reusable AI infrastructure library"
+authors = ["David Deppe"]
+readme = "README.md"
+packages = [{include = "arcium", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+mcp = {extras = ["cli"], version = "^1.26.0"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
