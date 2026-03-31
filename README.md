@@ -30,7 +30,7 @@ ReAct agents and other AI cognitive architectures for building autonomous system
 
 1. **Clone or navigate to the project directory:**
    ```bash
-   cd /Users/daviddeppe/Documents/Programming\ Projects/arcium
+   cd <my_projects>/arcium
    ```
 
 2. **Install dependencies with Poetry:**
@@ -50,7 +50,7 @@ ReAct agents and other AI cognitive architectures for building autonomous system
    Edit `config.json` and set your vault path:
    ```json
    {
-     "vault_path": "/Users/daviddeppe/Documents/claude-obi-vault"
+     "vault_path": "<my_vault>/claude-obi-vault"
    }
    ```
 
@@ -236,7 +236,7 @@ Here's a complete example of creating a new project that uses Arcium:
 ### Step 1: Create Your Project
 
 ```bash
-cd ~/Documents/Programming\ Projects
+cd ~/<my_projects>
 mkdir my-agent-poc
 cd my-agent-poc
 poetry init -n
