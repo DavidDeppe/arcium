@@ -82,3 +82,21 @@ Run the session-close workflow:
 - WAT Pipeline: 5 specialist agents (Team Lead, Architect, Engineer, Critic, Comms)
 - Skill files: `/Users/daviddeppe/Documents/arcium-vault/04-skills/`
 - Firm context: `/Users/daviddeppe/Documents/arcium-vault/01-firm-context/`
+
+## WAT Pipeline Behaviors
+
+**Polish loop** — When the Critic returns `PASS_WITH_CONDITIONS` with only medium/low issues,
+the pipeline runs one targeted polish pass (outside the main iteration counter) before
+Communications. The Engineer receives a scoped work order listing only the flagged items;
+the Critic then spot-checks only those items. STATUS.md shows
+`Critic passed with conditions — Engineer polishing before handoff` during this phase.
+
+**Feedback iteration** — Resume an existing PoC without re-running Discovery and Architecture:
+```bash
+poetry run python -m arcium.workflow.poc_pipeline \
+    --slug "word-frequency" \
+    --feedback "Add CSV export and support stdin in addition to file path"
+```
+This reads the existing Architect spec from vault, writes a feedback brief to
+`08-scratch/poc-pipeline-<slug>/05-feedback-brief.md`, and routes directly to the Engineer.
+Requires that the full pipeline has completed through the Architecture phase for that slug.

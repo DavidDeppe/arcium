@@ -7,7 +7,7 @@ deliverables.
 """
 
 from .models import AgentContext, IterationDecision, CriticAssessment, CriticIssue
-from .poc_pipeline import PoCPipeline, run_poc_pipeline
+from .poc_pipeline import PoCPipeline, run_poc_pipeline, run_feedback_pipeline
 
 __all__ = [
     "AgentContext",
@@ -16,4 +16,5 @@ __all__ = [
     "CriticIssue",
     "PoCPipeline",
     "run_poc_pipeline",
+    "run_feedback_pipeline",
 ]

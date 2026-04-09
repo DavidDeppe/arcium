@@ -46,6 +46,7 @@ class PoCPipeline:
         projects: Optional[ProjectTools] = None,
         api_key: Optional[str] = None,
         dev_mode: Optional[bool] = None,
+        execution_mode: Optional[str] = None,
         verbose: bool = True
     ):
         """
@@ -56,6 +57,8 @@ class PoCPipeline:
             projects: ProjectTools instance (creates default if None)
             api_key: Anthropic API key (defaults to env var)
             dev_mode: DEV_MODE flag (defaults to env var)
+            execution_mode: "autonomous" (ClaudeCodeAgent) or "api" (ReactAgent).
+                Defaults to ARCIUM_EXECUTION_MODE env var, then "autonomous".
             verbose: Whether to log pipeline progress
         """
         # Initialize vault
@@ -74,6 +77,13 @@ class PoCPipeline:
             dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
         self.dev_mode = dev_mode
 
+        # Determine execution mode
+        if execution_mode is None:
+            execution_mode = os.getenv("ARCIUM_EXECUTION_MODE", "autonomous").lower()
+        if execution_mode not in ("autonomous", "api"):
+            execution_mode = "autonomous"
+        self.execution_mode = execution_mode
+
         self.verbose = verbose
         self.cost_limit = self.COST_LIMIT_DEV if dev_mode else self.COST_LIMIT_PROD
 
@@ -90,6 +100,7 @@ class PoCPipeline:
             print(f"{'='*80}")
             print(f"💵 Cost Limit: ${self.cost_limit:.2f}")
             print(f"🔄 Max Iterations: {self.MAX_ITERATIONS}")
+            print(f"⚙️  Execution Mode: {self.execution_mode}")
             print(f"{'='*80}\n")
 
     def run(self, poc_idea: str, poc_slug: str) -> Dict[str, Any]:
@@ -139,6 +150,10 @@ class PoCPipeline:
                 if decision.action == "proceed":
                     # Quality gate passed - proceed to communications
                     break
+                elif decision.action == "polish_engineer":
+                    # PASS_WITH_CONDITIONS with only medium/low — one targeted polish pass
+                    context = self._polish_iteration(context, assessment)
+                    break  # always proceed to Communications after polish (win or fallback)
                 elif decision.action == "escalate_human":
                     # Need human intervention
                     return self._escalate_to_human(context, decision, assessment)
@@ -338,12 +353,12 @@ PoC project managed by the WAT pipeline with five specialist agents.
             print("PHASE 1: DISCOVERY & PLANNING (Team Lead)")
             print(f"{'='*80}\n")
 
-        # Create Team Lead agent (vault-only tools, autonomous mode)
+        # Create Team Lead agent (vault-only tools)
         team_lead = self.injector.create_specialist_agent(
             role="Team Lead",
             skill_file="04-skills/team-lead.md",
             tools_filter='vault_only',
-            execution_mode='autonomous',
+            execution_mode=self.execution_mode,
             api_key=self.api_key,
             verbose=self.verbose
         )
@@ -438,12 +453,12 @@ When you're done, provide Final Answer summarizing the brief.
             print("PHASE 2: ARCHITECTURE (Senior Architect)")
             print(f"{'='*80}\n")
 
-        # Create Architect agent (vault-only tools, autonomous mode)
+        # Create Architect agent (vault-only tools)
         architect = self.injector.create_specialist_agent(
             role="Senior Architect",
             skill_file="04-skills/senior-architect.md",
             tools_filter='vault_only',
-            execution_mode='autonomous',
+            execution_mode=self.execution_mode,
             api_key=self.api_key,
             verbose=self.verbose
         )
@@ -581,7 +596,7 @@ When done, provide Final Answer summarizing the architecture.
             role="Senior AI/ML Engineer",
             skill_file="04-skills/senior-engineer.md",
             tools_filter='all',
-            execution_mode='autonomous',  # ClaudeCodeAgent for code generation
+            execution_mode=self.execution_mode,  # ClaudeCodeAgent or ReactAgent
             api_key=self.api_key,
             verbose=self.verbose
         )
@@ -717,7 +732,7 @@ When done, provide Final Answer summarizing what was built.
             role="Solutions Critic",
             skill_file="04-skills/solutions-critic.md",
             tools_filter='all',
-            execution_mode='autonomous',  # ClaudeCodeAgent for thorough verification
+            execution_mode=self.execution_mode,  # ClaudeCodeAgent or ReactAgent
             api_key=self.api_key,
             verbose=self.verbose
         )
@@ -928,12 +943,16 @@ When done, provide Final Answer with your verdict.
                     target_issues=[i.title for i in assessment.get_issues_by_severity("high")]
                 )
             else:
+                medium_low = (
+                    assessment.get_issues_by_severity("medium")
+                    + assessment.get_issues_by_severity("low")
+                )
                 if self.verbose:
-                    print(f"   ✅ PASS_WITH_CONDITIONS: Only MEDIUM/LOW → Proceeding")
+                    print(f"   🪄  PASS_WITH_CONDITIONS: Only MEDIUM/LOW → Polish loop")
                 return IterationDecision(
-                    action="proceed",
-                    reason="Only MEDIUM/LOW issues - acceptable to proceed",
-                    target_issues=[]
+                    action="polish_engineer",
+                    reason="Only MEDIUM/LOW issues — targeted polish before Communications",
+                    target_issues=[i.title for i in medium_low]
                 )
 
         # PASS
@@ -977,6 +996,285 @@ When done, provide Final Answer with your verdict.
 
         return context
 
+    def _polish_iteration(
+        self,
+        context: AgentContext,
+        assessment: CriticAssessment
+    ) -> AgentContext:
+        """
+        One targeted polish pass for PASS_WITH_CONDITIONS with only medium/low issues.
+
+        Runs outside the main iteration counter (does not increment iteration_count).
+        If spot-check FAIL, falls back into normal rework by re-entering the dev loop
+        with a rework_engineer decision — but since we break after _polish_iteration
+        in run(), a spot-check FAIL just means we proceed to Communications anyway
+        rather than spinning endlessly. The Critic's spot-check verdict is preserved.
+        """
+        medium_low_issues = (
+            assessment.get_issues_by_severity("medium")
+            + assessment.get_issues_by_severity("low")
+        )
+
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print("POLISH LOOP — Targeted Engineer fix + Critic spot-check")
+            print(f"{'='*80}")
+            print(f"   Issues to address: {len(medium_low_issues)}")
+            for issue in medium_low_issues:
+                print(f"   - [{issue.severity.upper()}] {issue.title}")
+            print()
+
+        self._write_status(
+            context,
+            "Critic passed with conditions — Engineer polishing before handoff"
+        )
+
+        # Engineer targeted fix
+        context = self._phase_development_polish(context, medium_low_issues)
+        self._check_cost_limit(context)
+
+        # Critic lightweight spot-check
+        context, spotcheck = self._phase_review_spotcheck(context, medium_low_issues)
+        self._check_cost_limit(context)
+
+        if self.verbose:
+            verdict = spotcheck.verdict
+            print(f"\n✅ Polish loop complete — spot-check verdict: {verdict}")
+
+        return context
+
+    def _phase_development_polish(
+        self,
+        context: AgentContext,
+        issues: list
+    ) -> AgentContext:
+        """
+        Targeted Engineer pass: fix only the listed medium/low issues.
+
+        Does NOT re-scaffold or re-implement from scratch.
+        """
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print("POLISH: ENGINEER — Targeted issue fixes")
+            print(f"{'='*80}\n")
+
+        engineer = self.injector.create_specialist_agent(
+            role="Senior AI/ML Engineer",
+            skill_file="04-skills/senior-engineer.md",
+            tools_filter='all',
+            execution_mode=self.execution_mode,
+            api_key=self.api_key,
+            verbose=self.verbose
+        )
+
+        # Format targeted work order
+        work_order_lines = "\n".join(
+            f"  {i+1}. [{issue.severity.upper()}] {issue.title}\n"
+            f"     Fix: {issue.recommended_fix}\n"
+            f"     Evidence: {issue.evidence}"
+            for i, issue in enumerate(issues)
+        )
+
+        output_path = f"{context.scratch_dir}/02-engineer-output.md"
+        spec_path = context.specialist_outputs.get("architect", f"{context.scratch_dir}/01-architect-spec.md")
+        critic_report = context.specialist_outputs.get("critic", f"{context.scratch_dir}/03-critic-report.md")
+
+        task = f"""
+You are the Senior AI/ML Engineer. Execute a targeted POLISH PASS.
+
+This is NOT a full reimplementation. You are fixing specific medium and low severity
+issues identified by the Solutions Critic. Do not touch anything not listed below.
+
+Project: {context.poc_slug}
+Code location: {context.project_dir}/
+
+Read these files for context:
+1. Architecture spec: {spec_path}
+2. Critic report: {critic_report}
+3. Your previous implementation notes: {output_path}
+
+TARGETED WORK ORDER — fix ONLY these items:
+{work_order_lines}
+
+For each fix:
+- Use projects__read_file to read the relevant file first
+- Make the minimal targeted change with projects__write_file
+- Run projects__check_syntax on any changed Python file
+- Run projects__run_tests once all fixes are applied
+
+Then update your implementation notes at: {output_path}
+Append a section "## Polish Pass — {{datetime.now().strftime('%Y-%m-%d')}}" with:
+- What was fixed and how
+- Test results after fixes
+- Any remaining known issues
+
+Use YAML frontmatter (update the existing frontmatter):
+---
+type: engineer-output
+created: {datetime.now().strftime("%Y-%m-%d")}
+poc-slug: {context.poc_slug}
+phase: polish
+iteration: {context.iteration_count + 1}
+project-dir: {context.project_dir}
+---
+
+When done, provide Final Answer summarizing the fixes applied.
+"""
+
+        system_prompt = self.injector._build_system_prompt(
+            firm_context=self.injector._load_firm_context(),
+            skill_content=self.injector.load_skill("04-skills/senior-engineer.md"),
+            tools_filter='all'
+        )
+
+        result = self._execute_agent(
+            agent=engineer,
+            task=task,
+            system_prompt=system_prompt,
+            role="Senior AI/ML Engineer",
+            poc_slug=context.poc_slug,
+            iteration=context.iteration_count + 1
+        )
+
+        context.total_cost += result.total_cost
+        context.current_phase = "polish_complete"
+
+        if self.verbose:
+            print(f"\n✅ Engineer polish complete")
+            print(f"   Cost: ${result.total_cost:.4f}")
+
+        return context
+
+    def _phase_review_spotcheck(
+        self,
+        context: AgentContext,
+        prior_issues: list
+    ) -> tuple:
+        """
+        Lightweight Critic spot-check: verify only the previously flagged items were fixed.
+
+        Does NOT re-review the entire codebase. Scoped to prior_issues only.
+        Writes to 03-critic-spotcheck.md (not overwriting the original report).
+        """
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print("POLISH: CRITIC — Spot-check of previously flagged items")
+            print(f"{'='*80}\n")
+
+        critic = self.injector.create_specialist_agent(
+            role="Solutions Critic",
+            skill_file="04-skills/solutions-critic.md",
+            tools_filter='all',
+            execution_mode=self.execution_mode,
+            api_key=self.api_key,
+            verbose=self.verbose
+        )
+
+        spotcheck_path = f"{context.scratch_dir}/03-critic-spotcheck.md"
+
+        # Format the items to re-verify
+        check_lines = "\n".join(
+            f"  {i+1}. [{issue.severity.upper()}] {issue.title}\n"
+            f"     Original evidence: {issue.evidence}\n"
+            f"     Expected fix: {issue.recommended_fix}"
+            for i, issue in enumerate(prior_issues)
+        )
+
+        task = f"""
+You are the Solutions Critic. Execute a SPOT-CHECK ONLY — not a full review.
+
+The Engineer has applied targeted fixes for the following previously flagged items.
+Verify ONLY these specific items. Do not re-review the entire codebase.
+
+Project: {context.poc_slug}
+Code location: {context.project_dir}/
+
+ITEMS TO VERIFY:
+{check_lines}
+
+For each item:
+- Use projects tools to verify the fix was applied (read the relevant file)
+- Run projects__run_tests to confirm tests still pass
+- Mark each item as RESOLVED or STILL_PRESENT
+
+Write your spot-check report to: {spotcheck_path}
+
+REQUIRED YAML frontmatter:
+---
+type: critic-spotcheck
+created: {datetime.now().strftime("%Y-%m-%d")}
+poc-slug: {context.poc_slug}
+verdict: PASS | PASS_WITH_CONDITIONS | FAIL
+confidence: high | medium | low
+critical-count: 0
+high-count: 0
+medium-count: 0
+low-count: 0
+root-cause: null
+requires-human-decision: false
+iteration-number: {context.iteration_count + 1}
+---
+
+In the body:
+- List each item with RESOLVED or STILL_PRESENT status and brief evidence
+- Overall assessment: did the Engineer adequately address the flagged items?
+
+When done, provide Final Answer with your spot-check verdict.
+"""
+
+        system_prompt = self.injector._build_system_prompt(
+            firm_context=self.injector._load_firm_context(),
+            skill_content=self.injector.load_skill("04-skills/solutions-critic.md"),
+            tools_filter='all'
+        )
+
+        result = self._execute_agent(
+            agent=critic,
+            task=task,
+            system_prompt=system_prompt,
+            role="Solutions Critic",
+            poc_slug=context.poc_slug,
+            iteration=context.iteration_count + 1
+        )
+
+        context.total_cost += result.total_cost
+        context.current_phase = "spotcheck_complete"
+        context.specialist_outputs["critic_spotcheck"] = spotcheck_path
+
+        # Parse spotcheck assessment — fall back gracefully if parse fails
+        try:
+            spotcheck = CriticAssessment.parse_from_report(spotcheck_path, self.vault)
+        except Exception as e:
+            if self.verbose:
+                print(f"   ⚠️  Could not parse spot-check report: {e} — treating as PASS")
+            from .models import CriticAssessment as CA
+            spotcheck = CA(
+                verdict="PASS",
+                confidence="low",
+                critical_count=0,
+                high_count=0,
+                medium_count=0,
+                low_count=0,
+                root_cause=None,
+                requires_human_decision=False,
+                iteration_number=context.iteration_count + 1,
+                issues=[],
+                summary="Spot-check parse failed — proceeding to Communications",
+                strengths=[]
+            )
+
+        self._write_status(
+            context,
+            f"Spot-check complete — verdict: {spotcheck.verdict}"
+        )
+
+        if self.verbose:
+            print(f"   Verdict: {spotcheck.verdict}")
+            print(f"   Report: {spotcheck_path}")
+            print(f"   Cost: ${result.total_cost:.4f}")
+
+        return context, spotcheck
+
     def _phase_communications(self, context: AgentContext) -> AgentContext:
         """
         Phase 5: Communications (Communications Specialist)
@@ -1012,12 +1310,12 @@ When done, provide Final Answer with your verdict.
         except Exception:
             pass  # Already caught by prerequisite check
 
-        # Create Communications agent (vault-only tools, autonomous mode)
+        # Create Communications agent (vault-only tools)
         communicator = self.injector.create_specialist_agent(
             role="Communications Specialist",
             skill_file="04-skills/communications-specialist.md",
             tools_filter='vault_only',
-            execution_mode='autonomous',
+            execution_mode=self.execution_mode,
             api_key=self.api_key,
             verbose=self.verbose
         )
@@ -1130,7 +1428,7 @@ When done, provide Final Answer listing all deliverables created.
             print(f"\nReview report: {context.specialist_outputs.get('critic')}")
             print()
 
-        return {
+        result = {
             "status": "escalated",
             "reason": decision.reason,
             "phase": context.current_phase,
@@ -1142,6 +1440,47 @@ When done, provide Final Answer listing all deliverables created.
             "project_dir": context.project_dir,
             "action_required": "Review Critic report and decide: approve, reject, or request changes"
         }
+
+        self._vault_librarian(context, f"escalated — {assessment.verdict}")
+
+        return result
+
+    def _vault_librarian(self, context: AgentContext, outcome: str) -> None:
+        """
+        Lightweight vault-librarian: appends a one-line entry to CONVERSATIONS.md.
+
+        Fires at every pipeline exit point (completed or escalated).
+        Replaces the manual session-close for pipeline runs.
+
+        Args:
+            context: Final pipeline context
+            outcome: Short outcome string, e.g. "completed" or "escalated — FAIL"
+        """
+        conversations_path = "00-index/CONVERSATIONS.md"
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M")
+        feedback_tag = " [feedback-iteration]" if context.feedback_mode else ""
+
+        entry = (
+            f"\n### {date_str} — WAT pipeline: {context.poc_slug}{feedback_tag}\n"
+            f"- **Project**: {context.poc_slug}\n"
+            f"- **Agent**: wat-pipeline\n"
+            f"- **Key outcomes**: Pipeline run complete — outcome: {outcome}, "
+            f"cost: ${context.total_cost:.4f}, iterations: {context.iteration_count}, "
+            f"time: {time_str}\n"
+            f"- **Open threads**: Review scratch at {context.scratch_dir}/ and code at {context.project_dir}/\n"
+            f"- **Full summary**: inline — auto-logged by vault-librarian\n"
+        )
+
+        try:
+            self.vault.append_file(conversations_path, entry)
+            if self.verbose:
+                print(f"📚 Vault-librarian: appended entry to {conversations_path}")
+        except Exception as e:
+            # Non-fatal — pipeline result is already returned, don't mask it
+            if self.verbose:
+                print(f"⚠️  Vault-librarian failed to write to {conversations_path}: {e}")
 
     def _finalize_project(self, context: AgentContext) -> Dict[str, Any]:
         """
@@ -1161,19 +1500,7 @@ When done, provide Final Answer listing all deliverables created.
 
         self.vault.write_file(overview_path, updated)
 
-        if self.verbose:
-            print(f"\n{'='*80}")
-            print("✅ POC PIPELINE COMPLETE")
-            print(f"{'='*80}")
-            print(f"\nProject: {context.poc_slug}")
-            print(f"Total Cost: ${context.total_cost:.2f}")
-            print(f"Iterations: {context.iteration_count}")
-            print(f"\nDeliverables: 02-projects/{context.poc_slug}/")
-            print(f"Code: {context.project_dir}/")
-            print(f"Scratch: {context.scratch_dir}/")
-            print()
-
-        return {
+        result = {
             "status": "completed",
             "poc_slug": context.poc_slug,
             "total_cost": context.total_cost,
@@ -1190,13 +1517,291 @@ When done, provide Final Answer listing all deliverables created.
             "scratch": context.scratch_dir
         }
 
+        self._vault_librarian(context, "completed")
+
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print("✅ POC PIPELINE COMPLETE")
+            print(f"{'='*80}")
+            print(f"\nProject: {context.poc_slug}")
+            print(f"Total Cost: ${context.total_cost:.2f}")
+            print(f"Iterations: {context.iteration_count}")
+            print(f"\nDeliverables: 02-projects/{context.poc_slug}/")
+            print(f"Code: {context.project_dir}/")
+            print(f"Scratch: {context.scratch_dir}/")
+            print()
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Feedback iteration path
+    # ------------------------------------------------------------------
+
+    def run_with_feedback(self, feedback: str, poc_slug: str) -> Dict[str, Any]:
+        """
+        Resume an existing PoC with human feedback, skipping Discovery and Architecture.
+
+        Reads the existing vault context for poc_slug, treats feedback as the new
+        brief, and routes directly to the Engineer with the existing Architect spec
+        plus the feedback work order.
+
+        Args:
+            feedback: Human feedback describing what to change or add
+            poc_slug: Slug of the existing PoC (must have completed Architecture phase)
+
+        Returns:
+            Pipeline execution result (same shape as run())
+
+        Raises:
+            FileNotFoundError: If the Architect spec does not exist for this slug
+        """
+        context = self._load_existing_context(poc_slug, feedback)
+
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print(f"🔁 FEEDBACK ITERATION — {poc_slug}")
+            print(f"{'='*80}")
+            print(f"Skipping: Discovery, Architecture")
+            print(f"Starting at: Development (with feedback work order)")
+            print(f"Existing spec: {context.specialist_outputs['architect']}")
+            print(f"Feedback brief: {context.specialist_outputs['feedback']}")
+            print(f"{'='*80}\n")
+
+        self._write_status(
+            context,
+            "Feedback iteration started — skipping Discovery and Architecture phases"
+        )
+
+        try:
+            # Main iteration loop starting from Development
+            assessment = None
+            while context.iteration_count < self.MAX_ITERATIONS:
+                # Development — first pass uses feedback-aware task
+                if context.iteration_count == 0:
+                    context = self._phase_development_feedback(context)
+                else:
+                    context = self._phase_development(context)
+                self._check_cost_limit(context)
+
+                # Review
+                context, assessment = self._phase_review(context)
+                self._check_cost_limit(context)
+
+                decision = self._apply_iteration_framework(context, assessment)
+
+                if decision.action == "proceed":
+                    break
+                elif decision.action == "polish_engineer":
+                    context = self._polish_iteration(context, assessment)
+                    break
+                elif decision.action == "escalate_human":
+                    return self._escalate_to_human(context, decision, assessment)
+                else:
+                    context = self._rework_iteration(context, decision)
+
+            if context.iteration_count >= self.MAX_ITERATIONS:
+                return self._escalate_to_human(
+                    context,
+                    IterationDecision(
+                        action="escalate_human",
+                        reason=f"Exceeded {self.MAX_ITERATIONS} iteration cycles",
+                        target_issues=[]
+                    ),
+                    assessment
+                )
+
+            # Communications
+            context = self._phase_communications(context)
+            self._check_cost_limit(context)
+
+            return self._finalize_project(context)
+
+        except Exception as e:
+            if self.verbose:
+                print(f"\n❌ Feedback pipeline error: {e}")
+            raise
+
+    def _load_existing_context(self, poc_slug: str, feedback: str) -> AgentContext:
+        """
+        Reconstruct AgentContext from an existing vault/project for feedback iteration.
+
+        Raises:
+            FileNotFoundError: If the Architect spec does not exist for this slug
+        """
+        scratch_dir = f"08-scratch/poc-pipeline-{poc_slug}"
+        spec_path = f"{scratch_dir}/01-architect-spec.md"
+        brief_path = f"{scratch_dir}/00-brief.md"
+        project_dir = str(Path.home() / "projects" / poc_slug)
+
+        # Hard requirement: Architect spec must exist
+        try:
+            content = self.vault.read_file(spec_path)
+            if not content or not content.strip():
+                raise ValueError("empty")
+        except Exception:
+            raise FileNotFoundError(
+                f"Architect spec not found for slug '{poc_slug}'.\n"
+                f"Expected: {spec_path}\n"
+                f"Run the full pipeline first: "
+                f"--idea '...' --slug '{poc_slug}'"
+            )
+
+        # Write feedback brief
+        feedback_path = f"{scratch_dir}/05-feedback-brief.md"
+        feedback_content = f"""---
+type: feedback-brief
+created: {datetime.now().strftime("%Y-%m-%d")}
+poc-slug: {poc_slug}
+phase: feedback-iteration
+---
+
+# Feedback Brief
+
+**Original project**: {poc_slug}
+**Feedback received**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## Human Feedback
+
+{feedback}
+
+## Instructions for Engineer
+
+Apply the above feedback to the existing implementation at `{project_dir}/`.
+Reference the Architect spec at `{spec_path}` for architectural constraints.
+Do not deviate from the original architecture unless the feedback explicitly requires it.
+"""
+        self.vault.write_file(feedback_path, feedback_content)
+
+        # Ensure ~/projects/<slug>/ exists (may not if feedback run before first code run)
+        Path(project_dir).mkdir(parents=True, exist_ok=True)
+
+        context = AgentContext(
+            poc_slug=poc_slug,
+            scratch_dir=scratch_dir,
+            project_dir=project_dir,
+            brief_path=brief_path,
+            current_phase="feedback_start",
+            iteration_count=0,
+            feedback_mode=True,
+            feedback_text=feedback,
+        )
+        context.specialist_outputs["architect"] = spec_path
+        context.specialist_outputs["feedback"] = feedback_path
+
+        return context
+
+    def _phase_development_feedback(self, context: AgentContext) -> AgentContext:
+        """
+        Feedback-aware development pass.
+
+        Sends the Engineer both the existing Architect spec and the feedback brief
+        rather than just the spec. Does NOT re-scaffold the project from zero.
+        """
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print("PHASE 3 (FEEDBACK): DEVELOPMENT (Senior Engineer)")
+            print(f"{'='*80}\n")
+
+        spec_path = context.specialist_outputs.get("architect", f"{context.scratch_dir}/01-architect-spec.md")
+        feedback_path = context.specialist_outputs.get("feedback", f"{context.scratch_dir}/05-feedback-brief.md")
+        output_path = f"{context.scratch_dir}/02-engineer-output.md"
+
+        engineer = self.injector.create_specialist_agent(
+            role="Senior AI/ML Engineer",
+            skill_file="04-skills/senior-engineer.md",
+            tools_filter='all',
+            execution_mode=self.execution_mode,
+            api_key=self.api_key,
+            verbose=self.verbose
+        )
+
+        task = f"""
+You are the Senior AI/ML Engineer. Execute a FEEDBACK ITERATION.
+
+This is NOT a fresh build. You are updating an existing implementation based on
+human feedback. The architecture is already defined — follow it unless the feedback
+explicitly overrides a specific decision.
+
+Project: {context.poc_slug}
+Existing code: {context.project_dir}/
+
+Read these files in order:
+1. Feedback brief (PRIMARY — this defines your work order): {feedback_path}
+2. Architecture spec (REFERENCE — your constraints): {spec_path}
+3. Previous engineer output (if exists): {output_path}
+
+Your tasks:
+1. Read the feedback brief completely
+2. Read the architecture spec to understand constraints
+3. Inspect the existing code with projects__list_files and projects__read_file
+4. Implement the changes described in the feedback
+5. Run projects__check_syntax on all changed Python files
+6. Run projects__run_tests — fix any regressions before proceeding
+
+⚠️  TOOL RULES (same as always):
+- projects__write_file for ALL code files (.py, .toml, .yml, etc.)
+- vault__write_file for markdown ONLY
+- Do NOT re-run projects__create_structure — the project already exists
+
+OUTPUT — Write implementation notes to: {output_path}
+Overwrite with a fresh document using this YAML frontmatter:
+---
+type: engineer-output
+created: {datetime.now().strftime("%Y-%m-%d")}
+poc-slug: {context.poc_slug}
+phase: feedback-development
+iteration: 1
+project-dir: {context.project_dir}
+---
+
+Include:
+- Summary of feedback changes applied
+- Files modified (list each one)
+- Test results
+- Any deviations from original architecture (with justification)
+- Known remaining limitations
+
+When done, provide Final Answer summarizing the feedback changes applied.
+"""
+
+        system_prompt = self.injector._build_system_prompt(
+            firm_context=self.injector._load_firm_context(),
+            skill_content=self.injector.load_skill("04-skills/senior-engineer.md"),
+            tools_filter='all'
+        )
+
+        result = self._execute_agent(
+            agent=engineer,
+            task=task,
+            system_prompt=system_prompt,
+            role="Senior AI/ML Engineer",
+            poc_slug=context.poc_slug,
+            iteration=1
+        )
+
+        context.specialist_outputs["engineer"] = output_path
+        context.code_artifacts["main"] = f"{context.project_dir}/src/{context.poc_slug.replace('-', '_')}/main.py"
+        context.total_cost += result.total_cost
+        context.current_phase = "feedback_development_complete"
+
+        if self.verbose:
+            print(f"\n✅ Feedback development complete")
+            print(f"   Docs: {output_path}")
+            print(f"   Code: {context.project_dir}/")
+            print(f"   Cost: ${result.total_cost:.4f}")
+
+        self._write_status(context, "Feedback development complete — Critic reviewing")
+
+        return context
+
 
 # Convenience function
 def run_poc_pipeline(
     poc_idea: str,
     poc_slug: str,
     api_key: Optional[str] = None,
-    dev_mode: Optional[bool] = None
+    dev_mode: Optional[bool] = None,
+    execution_mode: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Run the complete PoC pipeline with default settings.
@@ -1219,5 +1824,185 @@ def run_poc_pipeline(
         >>> if result["status"] == "completed":
         ...     print(result["deliverables"])
     """
-    pipeline = PoCPipeline(api_key=api_key, dev_mode=dev_mode)
+    pipeline = PoCPipeline(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode)
     return pipeline.run(poc_idea, poc_slug)
+
+
+def run_feedback_pipeline(
+    feedback: str,
+    poc_slug: str,
+    api_key: Optional[str] = None,
+    dev_mode: Optional[bool] = None,
+    execution_mode: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Resume an existing PoC with human feedback, skipping Discovery and Architecture.
+
+    Args:
+        feedback: Human feedback describing what to change or add
+        poc_slug: Slug of the existing PoC (Architect spec must exist in vault)
+        api_key: Anthropic API key (optional, defaults to env var)
+        dev_mode: Use DEV_MODE for cost control (optional, defaults to env var)
+        execution_mode: "autonomous" or "api" (optional, defaults to env var)
+
+    Returns:
+        Pipeline result with deliverable paths or escalation details
+
+    Raises:
+        FileNotFoundError: If the Architect spec does not exist for this slug
+    """
+    pipeline = PoCPipeline(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode)
+    return pipeline.run_with_feedback(feedback, poc_slug)
+
+
+def _cli_main() -> None:
+    """CLI entry point: poetry run python -m arcium.workflow.poc_pipeline"""
+    import argparse
+    import json
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="arcium.workflow.poc_pipeline",
+        description="Run the Arcium WAT Pipeline to build a PoC end-to-end.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # New PoC — full pipeline
+  poetry run python -m arcium.workflow.poc_pipeline \\
+      --idea "Build a CLI tool that counts word frequency in a text file" \\
+      --slug "word-frequency"
+
+  # Feedback iteration — skips Discovery and Architecture
+  poetry run python -m arcium.workflow.poc_pipeline \\
+      --slug "word-frequency" \\
+      --feedback "Add CSV export and support stdin in addition to file path"
+
+  # New PoC using Anthropic API instead of Claude Code CLI
+  poetry run python -m arcium.workflow.poc_pipeline \\
+      --idea "Summarize client emails using the Anthropic API" \\
+      --slug "email-summarizer" \\
+      --mode api
+
+Environment variables:
+  ARCIUM_EXECUTION_MODE  autonomous (default) or api
+  DEV_MODE               true for Haiku/low-cost, false for Sonnet/production
+  ANTHROPIC_API_KEY      Required when --mode api (or ARCIUM_EXECUTION_MODE=api)
+        """,
+    )
+    parser.add_argument(
+        "--idea",
+        metavar="TEXT",
+        help="High-level PoC concept (what to build). Ignored when --feedback is used.",
+    )
+    parser.add_argument(
+        "--slug",
+        metavar="SLUG",
+        help="URL-safe project slug used for folder names (e.g. word-frequency). "
+             "Required when --feedback is used.",
+    )
+    parser.add_argument(
+        "--feedback",
+        metavar="TEXT",
+        default=None,
+        help=(
+            "Human feedback for an existing PoC. When provided, --slug is required and "
+            "--idea is ignored. Skips Discovery and Architecture — routes directly to "
+            "the Engineer with the existing Architect spec plus this feedback as the work order."
+        ),
+    )
+    parser.add_argument(
+        "--mode",
+        metavar="MODE",
+        choices=["autonomous", "api"],
+        default=None,
+        help=(
+            "Execution mode. 'autonomous' uses ClaudeCodeAgent via Claude Code CLI "
+            "(requires Max/Pro subscription, no API credits consumed). "
+            "'api' uses ReactAgent via Anthropic API (requires ANTHROPIC_API_KEY with credits). "
+            "Defaults to ARCIUM_EXECUTION_MODE env var, then 'autonomous'."
+        ),
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        default=None,
+        help="Enable DEV_MODE (Haiku model, $2 cost cap). Overrides DEV_MODE env var.",
+    )
+
+    args = parser.parse_args()
+    dev_mode = args.dev if args.dev else None  # None → read from env
+
+    # ---- Feedback iteration path ----
+    if args.feedback is not None:
+        if not args.slug:
+            print("Error: --slug is required when using --feedback.", file=sys.stderr)
+            sys.exit(1)
+
+        print("=" * 80)
+        print("WAT PIPELINE — FEEDBACK ITERATION")
+        print("=" * 80)
+        print(f"Slug     : {args.slug}")
+        print(f"Feedback : {args.feedback[:80]}{'...' if len(args.feedback) > 80 else ''}")
+        print(f"Mode     : {args.mode or os.getenv('ARCIUM_EXECUTION_MODE', 'autonomous')}")
+        print("=" * 80)
+        print()
+
+        try:
+            result = run_feedback_pipeline(
+                feedback=args.feedback,
+                poc_slug=args.slug,
+                execution_mode=args.mode,
+                dev_mode=dev_mode,
+            )
+        except FileNotFoundError as exc:
+            print(f"\nError: {exc}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as exc:
+            print(f"\nPipeline error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    # ---- New PoC path ----
+    else:
+        poc_idea = args.idea
+        if not poc_idea:
+            print("No --idea provided. Enter interactively.")
+            poc_idea = input("PoC idea: ").strip()
+            if not poc_idea:
+                print("Error: PoC idea is required.", file=sys.stderr)
+                sys.exit(1)
+
+        poc_slug = args.slug
+        if not poc_slug:
+            default_slug = poc_idea[:30].lower().replace(" ", "-").strip("-")
+            poc_slug = input(f"PoC slug [{default_slug}]: ").strip() or default_slug
+
+        print("=" * 80)
+        print("WAT PIPELINE — NEW POC")
+        print("=" * 80)
+        print(f"Idea : {poc_idea}")
+        print(f"Slug : {poc_slug}")
+        print(f"Mode : {args.mode or os.getenv('ARCIUM_EXECUTION_MODE', 'autonomous')}")
+        print("=" * 80)
+        print()
+
+        try:
+            result = run_poc_pipeline(
+                poc_idea=poc_idea,
+                poc_slug=poc_slug,
+                execution_mode=args.mode,
+                dev_mode=dev_mode,
+            )
+        except Exception as exc:
+            print(f"\nPipeline error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    print()
+    print("=" * 80)
+    print("RESULT")
+    print("=" * 80)
+    print(json.dumps(result, indent=2, default=str))
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    _cli_main()

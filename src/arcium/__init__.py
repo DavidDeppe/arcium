@@ -32,7 +32,7 @@ from . import agent
 from . import workflow
 from . import projects
 from .agent import ReactAgent, ReActResult, Step, TokenUsage
-from .workflow import PoCPipeline, run_poc_pipeline
+from .workflow import PoCPipeline, run_poc_pipeline, run_feedback_pipeline
 from .projects import ProjectTools
 
 __version__ = "0.1.0"
@@ -47,5 +47,6 @@ __all__ = [
     "TokenUsage",
     "PoCPipeline",
     "run_poc_pipeline",
+    "run_feedback_pipeline",
     "ProjectTools",
 ]

@@ -42,6 +42,9 @@ class ArciumConfig:
     # Mode Configuration
     dev_mode: bool
 
+    # Execution mode: "autonomous" (ClaudeCodeAgent) or "api" (ReactAgent via AnthropicBackend)
+    execution_mode: str
+
     @classmethod
     def from_env(cls) -> "ArciumConfig":
         """
@@ -54,6 +57,7 @@ class ArciumConfig:
             ARCIUM_REASONING_LOG_DIR: Path to reasoning logs (default: <vault>/06-findings)
             ANTHROPIC_API_KEY: Anthropic API key (optional)
             DEV_MODE: Use DEV mode (Haiku, lower cost limits) (default: false)
+            ARCIUM_EXECUTION_MODE: Agent backend — "autonomous" (ClaudeCodeAgent) or "api" (ReactAgent) (default: autonomous)
 
         Returns:
             ArciumConfig instance
@@ -88,13 +92,19 @@ class ArciumConfig:
         # Dev mode
         dev_mode = os.getenv('DEV_MODE', 'false').lower() == 'true'
 
+        # Execution mode
+        execution_mode = os.getenv('ARCIUM_EXECUTION_MODE', 'autonomous').lower()
+        if execution_mode not in ('autonomous', 'api'):
+            execution_mode = 'autonomous'
+
         return cls(
             mcp_config_path=mcp_config_path,
             vault_path=vault_path,
             projects_path=projects_path,
             reasoning_log_dir=reasoning_log_dir,
             anthropic_api_key=anthropic_api_key,
-            dev_mode=dev_mode
+            dev_mode=dev_mode,
+            execution_mode=execution_mode
         )
 
     def validate(self) -> None:

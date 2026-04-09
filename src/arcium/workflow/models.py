@@ -22,12 +22,16 @@ class AgentContext:
     specialist_outputs: Dict[str, str] = field(default_factory=dict)  # role → output path
     code_artifacts: Dict[str, str] = field(default_factory=dict)      # purpose → code path
     total_cost: float = 0.0
+    failed: bool = False
+    error: Optional[str] = None
+    feedback_mode: bool = False
+    feedback_text: Optional[str] = None
 
 
 @dataclass
 class IterationDecision:
     """Decision from Team Lead on how to proceed after Critic review."""
-    action: Literal["proceed", "rework_architect", "rework_engineer", "escalate_human"]
+    action: Literal["proceed", "rework_architect", "rework_engineer", "escalate_human", "polish_engineer"]
     reason: str
     target_issues: List[str]  # Specific issues to address
 

@@ -100,8 +100,18 @@ Edit the following vault files with your organization's context:
 ## Running Examples
 
 ```bash
-# Run the full WAT pipeline end-to-end
+# Run the full WAT pipeline end-to-end (interactive prompts if no args)
 poetry run python examples/run_pipeline.py
+
+# Or invoke directly with arguments
+poetry run python -m arcium.workflow.poc_pipeline \
+    --idea "Build a word frequency CLI tool" \
+    --slug "word-frequency"
+
+# Feedback iteration on an existing PoC (skips Discovery + Architecture)
+poetry run python -m arcium.workflow.poc_pipeline \
+    --slug "word-frequency" \
+    --feedback "Add CSV export and support stdin"
 
 # Smoke test all MCP tools
 poetry run python examples/smoke_test_mcp.py
@@ -232,8 +242,50 @@ requires-human-decision: false
 ```
 
 - `PASS` → proceeds to Communications
-- `PASS_WITH_CONDITIONS` → auto-iterates on minor issues or escalates to human on substantial ones
+- `PASS_WITH_CONDITIONS` with HIGH issues → auto-iterates (minor) or escalates to human (substantial)
+- `PASS_WITH_CONDITIONS` with only MEDIUM/LOW → triggers **polish loop** (see below)
 - `FAIL` → routes to Architect (`design_flaw`) or Engineer (`implementation_bug`), or escalates (`infeasible`)
+
+### Polish Loop
+
+When the Critic issues `PASS_WITH_CONDITIONS` with only medium and low severity issues, the pipeline runs one targeted polish pass outside the main iteration counter:
+
+1. Engineer receives a scoped work order listing only the flagged items (not the full report)
+2. Critic runs a lightweight spot-check verifying only those specific items
+3. Pipeline proceeds to Communications regardless of spot-check result (FAIL falls back gracefully)
+
+STATUS.md shows `Critic passed with conditions — Engineer polishing before handoff` during this phase.
+The spot-check report is written to `03-critic-spotcheck.md` alongside the original `03-critic-report.md`.
+
+### Feedback Iteration
+
+Resume an existing PoC with human feedback without re-running Discovery and Architecture:
+
+```bash
+# After initial pipeline run on word-frequency
+poetry run python -m arcium.workflow.poc_pipeline \
+    --slug "word-frequency" \
+    --feedback "Add CSV export and support stdin in addition to file path"
+```
+
+What happens:
+1. Loads existing Architect spec from `08-scratch/poc-pipeline-<slug>/01-architect-spec.md`
+2. Writes feedback to `08-scratch/poc-pipeline-<slug>/05-feedback-brief.md`
+3. Skips Team Lead and Architect — routes directly to Engineer
+4. Engineer receives existing spec + feedback as a combined work order
+5. Continues through normal Review → Polish Loop → Communications flow
+
+Requires that the full pipeline has completed through the Architecture phase for the given slug.
+If the Architect spec is missing, the pipeline raises a `FileNotFoundError` with instructions.
+
+```python
+from arcium import run_feedback_pipeline
+
+result = run_feedback_pipeline(
+    feedback="Add CSV export and support stdin in addition to file path",
+    poc_slug="word-frequency"
+)
+```
 
 ### Cost Controls
 
