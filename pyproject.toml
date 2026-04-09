@@ -9,6 +9,9 @@ packages = [{include = "arcium", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.10"
 mcp = {extras = ["cli"], version = "^1.26.0"}
+anthropic = "^0.40.0"
+python-dotenv = "^1.0.0"
+pyyaml = "^6.0.3"
 
 
 [build-system]

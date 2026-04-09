@@ -37,5 +37,9 @@ env/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project specific — local machine paths and secrets
+config.json
 config.local.json
+.mcp.json
+.env
+.env.local
