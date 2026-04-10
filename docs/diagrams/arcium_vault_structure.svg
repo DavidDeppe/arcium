@@ -1,0 +1,44 @@
+<svg width="100%" viewBox="0 0 680 480" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<style>
+  text { font-family: Arial, sans-serif; fill: #1a1a1a; }
+  .th { font-size: 14px; font-weight: 500; }
+  .ts { font-size: 12px; font-weight: 400; fill: #555; }
+  .c-blue rect { fill: #E6F1FB; stroke: #185FA5; }
+  .c-blue text { fill: #042C53; }
+  .c-purple rect { fill: #EEEDFE; stroke: #534AB7; }
+  .c-purple text { fill: #26215C; }
+  .c-teal rect { fill: #E1F5EE; stroke: #0F6E56; }
+  .c-teal text { fill: #04342C; }
+  .c-coral rect { fill: #FAECE7; stroke: #993C1D; }
+  .c-coral text { fill: #4A1B0C; }
+  .c-gray rect { fill: #F1EFE8; stroke: #5F5E5A; }
+  .c-gray text { fill: #2C2C2A; }
+  .c-amber rect { fill: #FAEEDA; stroke: #854F0B; }
+  .c-amber text { fill: #412402; }
+  .arr { stroke: #888; stroke-width: 1.5; fill: none; }
+</style>
+</defs>
+<text class="th" x="340" y="28" text-anchor="middle" font-size="16">Arcium vault — persistent memory</text>
+<g class="c-blue"><rect x="40" y="44" width="430" height="400" rx="16" stroke-width="0.5"/><text class="th" x="255" y="68" text-anchor="middle">arcium-vault/</text></g>
+<g class="c-purple"><rect x="60" y="82" width="185" height="52" rx="6" stroke-width="0.5"/><text class="th" x="152" y="102" text-anchor="middle" dominant-baseline="central">00-index/</text><text class="ts" x="152" y="120" text-anchor="middle" dominant-baseline="central">Schema, registries, PoC run log</text></g>
+<g class="c-purple"><rect x="255" y="82" width="195" height="52" rx="6" stroke-width="0.5"/><text class="th" x="352" y="102" text-anchor="middle" dominant-baseline="central">01-firm-context/</text><text class="ts" x="352" y="120" text-anchor="middle" dominant-baseline="central">Constraints, domain, stakeholders</text></g>
+<g class="c-teal"><rect x="60" y="146" width="185" height="52" rx="6" stroke-width="0.5"/><text class="th" x="152" y="166" text-anchor="middle" dominant-baseline="central">04-skills/</text><text class="ts" x="152" y="184" text-anchor="middle" dominant-baseline="central">5 reusable agent skill files</text></g>
+<g class="c-teal"><rect x="255" y="146" width="195" height="52" rx="6" stroke-width="0.5"/><text class="th" x="352" y="166" text-anchor="middle" dominant-baseline="central">03-agents/</text><text class="ts" x="352" y="184" text-anchor="middle" dominant-baseline="central">Agent definitions, workflows</text></g>
+<g class="c-coral"><rect x="60" y="210" width="185" height="52" rx="6" stroke-width="0.5"/><text class="th" x="152" y="230" text-anchor="middle" dominant-baseline="central">02-projects/</text><text class="ts" x="152" y="248" text-anchor="middle" dominant-baseline="central">PoC deliverables + overviews</text></g>
+<g class="c-coral"><rect x="255" y="210" width="195" height="52" rx="6" stroke-width="0.5"/><text class="th" x="352" y="230" text-anchor="middle" dominant-baseline="central">08-scratch/</text><text class="ts" x="352" y="248" text-anchor="middle" dominant-baseline="central">Pipeline working files, STATUS.md</text></g>
+<g class="c-gray"><rect x="60" y="274" width="185" height="52" rx="6" stroke-width="0.5"/><text class="th" x="152" y="294" text-anchor="middle" dominant-baseline="central">05-conversations/</text><text class="ts" x="152" y="312" text-anchor="middle" dominant-baseline="central">Dev session summaries</text></g>
+<g class="c-gray"><rect x="255" y="274" width="195" height="52" rx="6" stroke-width="0.5"/><text class="th" x="352" y="294" text-anchor="middle" dominant-baseline="central">06-findings/</text><text class="ts" x="352" y="312" text-anchor="middle" dominant-baseline="central">Reasoning logs, critic reports</text></g>
+<g class="c-amber"><rect x="60" y="338" width="390" height="44" rx="6" stroke-width="0.5"/><text class="th" x="255" y="354" text-anchor="middle" dominant-baseline="central">AGENTS.md — AI-agnostic briefing</text><text class="ts" x="255" y="372" text-anchor="middle" dominant-baseline="central">Claude Code, Cursor, Copilot all read this on session start</text></g>
+<text class="th" x="580" y="68" text-anchor="middle">Reads vault</text>
+<g class="c-purple"><rect x="500" y="82" width="140" height="44" rx="6" stroke-width="0.5"/><text class="th" x="570" y="98" text-anchor="middle" dominant-baseline="central">Claude Code</text><text class="ts" x="570" y="114" text-anchor="middle" dominant-baseline="central">Session orient</text></g>
+<g class="c-coral"><rect x="500" y="138" width="140" height="44" rx="6" stroke-width="0.5"/><text class="th" x="570" y="154" text-anchor="middle" dominant-baseline="central">Pipeline agents</text><text class="ts" x="570" y="170" text-anchor="middle" dominant-baseline="central">Read + write</text></g>
+<g class="c-gray"><rect x="500" y="194" width="140" height="44" rx="6" stroke-width="0.5"/><text class="th" x="570" y="210" text-anchor="middle" dominant-baseline="central">Any AI tool</text><text class="ts" x="570" y="226" text-anchor="middle" dominant-baseline="central">Via AGENTS.md</text></g>
+<line x1="472" y1="104" x2="498" y2="104" stroke="#888" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="472" y1="160" x2="498" y2="160" stroke="#888" stroke-width="1" marker-end="url(#arrow)"/>
+<line x1="472" y1="216" x2="498" y2="216" stroke="#888" stroke-width="1" marker-end="url(#arrow)"/>
+<text class="ts" x="570" y="290" text-anchor="middle">Survives session</text>
+<text class="ts" x="570" y="306" text-anchor="middle">restarts, crashes,</text>
+<text class="ts" x="570" y="322" text-anchor="middle">and AI tool switches</text>
+</svg>

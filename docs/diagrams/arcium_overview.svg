@@ -1,0 +1,51 @@
+<svg width="100%" viewBox="0 0 680 520" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<style>
+  text { font-family: Arial, sans-serif; fill: #1a1a1a; }
+  .th { font-size: 14px; font-weight: 500; }
+  .ts { font-size: 12px; font-weight: 400; fill: #555; }
+  .c-gray rect { fill: #F1EFE8; stroke: #5F5E5A; }
+  .c-gray text { fill: #2C2C2A; }
+  .c-purple rect { fill: #EEEDFE; stroke: #534AB7; }
+  .c-purple text { fill: #26215C; }
+  .c-teal rect { fill: #E1F5EE; stroke: #0F6E56; }
+  .c-teal text { fill: #04342C; }
+  .c-coral rect { fill: #FAECE7; stroke: #993C1D; }
+  .c-coral text { fill: #4A1B0C; }
+  .c-amber rect { fill: #FAEEDA; stroke: #854F0B; }
+  .c-amber text { fill: #412402; }
+  .c-blue rect { fill: #E6F1FB; stroke: #185FA5; }
+  .c-blue text { fill: #042C53; }
+  .c-green rect { fill: #EAF3DE; stroke: #3B6D11; }
+  .c-green text { fill: #173404; }
+  .arr { stroke: #888; stroke-width: 1.5; fill: none; }
+</style>
+</defs>
+<text class="th" x="340" y="32" text-anchor="middle" font-size="16">What Arcium is</text>
+<g class="c-gray"><rect x="270" y="55" width="140" height="44" rx="8" stroke-width="0.5"/><text class="th" x="340" y="77" text-anchor="middle" dominant-baseline="central">User</text></g>
+<line x1="340" y1="99" x2="340" y2="128" class="arr" marker-end="url(#arrow)"/>
+<text class="ts" x="355" y="118" text-anchor="start">PoC idea + slug</text>
+<g class="c-purple"><rect x="60" y="132" width="560" height="192" rx="16" stroke-width="0.5"/><text class="th" x="340" y="158" text-anchor="middle">Arcium WAT pipeline</text></g>
+<g class="c-teal"><rect x="80" y="170" width="94" height="52" rx="6" stroke-width="0.5"/><text class="th" x="127" y="190" text-anchor="middle" dominant-baseline="central">Team Lead</text><text class="ts" x="127" y="208" text-anchor="middle" dominant-baseline="central">Brief + routing</text></g>
+<g class="c-teal"><rect x="186" y="170" width="94" height="52" rx="6" stroke-width="0.5"/><text class="th" x="233" y="190" text-anchor="middle" dominant-baseline="central">Architect</text><text class="ts" x="233" y="208" text-anchor="middle" dominant-baseline="central">Spec + tests</text></g>
+<g class="c-coral"><rect x="292" y="170" width="96" height="52" rx="6" stroke-width="0.5"/><text class="th" x="340" y="190" text-anchor="middle" dominant-baseline="central">Engineer</text><text class="ts" x="340" y="208" text-anchor="middle" dominant-baseline="central">Code + tests</text></g>
+<g class="c-amber"><rect x="400" y="170" width="94" height="52" rx="6" stroke-width="0.5"/><text class="th" x="447" y="190" text-anchor="middle" dominant-baseline="central">Critic</text><text class="ts" x="447" y="208" text-anchor="middle" dominant-baseline="central">Independent QA</text></g>
+<g class="c-teal"><rect x="506" y="170" width="96" height="52" rx="6" stroke-width="0.5"/><text class="th" x="554" y="190" text-anchor="middle" dominant-baseline="central">Comms</text><text class="ts" x="554" y="208" text-anchor="middle" dominant-baseline="central">Stakeholder docs</text></g>
+<line x1="174" y1="196" x2="184" y2="196" class="arr" marker-end="url(#arrow)"/>
+<line x1="280" y1="196" x2="290" y2="196" class="arr" marker-end="url(#arrow)"/>
+<line x1="388" y1="196" x2="398" y2="196" class="arr" marker-end="url(#arrow)"/>
+<line x1="494" y1="196" x2="504" y2="196" class="arr" marker-end="url(#arrow)"/>
+<path d="M447 222 Q447 255 340 255 Q233 255 233 222" fill="none" stroke="#888" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<text class="ts" x="340" y="268" text-anchor="middle">Polish loop on conditions</text>
+<g class="c-blue"><rect x="80" y="370" width="240" height="56" rx="8" stroke-width="0.5"/><text class="th" x="200" y="392" text-anchor="middle" dominant-baseline="central">Arcium vault</text><text class="ts" x="200" y="410" text-anchor="middle" dominant-baseline="central">Memory, skills, vault librarian</text></g>
+<g class="c-green"><rect x="360" y="370" width="240" height="56" rx="8" stroke-width="0.5"/><text class="th" x="480" y="392" text-anchor="middle" dominant-baseline="central">~/projects/</text><text class="ts" x="480" y="410" text-anchor="middle" dominant-baseline="central">Generated code + tests</text></g>
+<line x1="200" y1="324" x2="200" y2="340" stroke="#888" stroke-width="1"/>
+<line x1="480" y1="324" x2="480" y2="340" stroke="#888" stroke-width="1"/>
+<line x1="200" y1="340" x2="480" y2="340" stroke="#888" stroke-width="1"/>
+<line x1="200" y1="340" x2="200" y2="368" class="arr" marker-end="url(#arrow)"/>
+<line x1="480" y1="340" x2="480" y2="368" class="arr" marker-end="url(#arrow)"/>
+<line x1="340" y1="426" x2="340" y2="468" class="arr" marker-end="url(#arrow)"/>
+<text class="ts" x="356" y="453" text-anchor="start">Working PoC</text>
+<g class="c-gray"><rect x="240" y="470" width="200" height="40" rx="8" stroke-width="0.5"/><text class="th" x="340" y="490" text-anchor="middle" dominant-baseline="central">Deliverables to user</text></g>
+</svg>

@@ -10,6 +10,22 @@ Arcium provides:
 
 ---
 
+## Architecture
+
+### System overview
+
+![Arcium system overview](docs/diagrams/arcium_overview.svg)
+
+### Pipeline execution flow
+
+![WAT pipeline execution flow](docs/diagrams/arcium_pipeline_flow.svg)
+
+### Vault structure
+
+![Arcium vault structure](docs/diagrams/arcium_vault_structure.svg)
+
+---
+
 ## AI Agent Briefing Files
 
 Arcium uses `AGENTS.md` as the canonical AI briefing file. It is recognized by multiple AI coding assistants:
