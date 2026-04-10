@@ -1447,40 +1447,56 @@ When done, provide Final Answer listing all deliverables created.
 
     def _vault_librarian(self, context: AgentContext, outcome: str) -> None:
         """
-        Lightweight vault-librarian: appends a one-line entry to CONVERSATIONS.md.
+        Lightweight vault-librarian: appends one row to 00-index/POC-RUNS.md.
 
-        Fires at every pipeline exit point (completed or escalated).
-        Replaces the manual session-close for pipeline runs.
+        PoC execution history is separate from Arcium development history
+        (CONVERSATIONS.md). POC-RUNS.md is a simple table — one row per run.
+
+        Creates POC-RUNS.md with a table header if the file doesn't exist yet.
 
         Args:
             context: Final pipeline context
             outcome: Short outcome string, e.g. "completed" or "escalated — FAIL"
         """
-        conversations_path = "00-index/CONVERSATIONS.md"
+        poc_runs_path = "00-index/POC-RUNS.md"
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M")
-        feedback_tag = " [feedback-iteration]" if context.feedback_mode else ""
+        feedback_tag = " (feedback)" if context.feedback_mode else ""
 
-        entry = (
-            f"\n### {date_str} — WAT pipeline: {context.poc_slug}{feedback_tag}\n"
-            f"- **Project**: {context.poc_slug}\n"
-            f"- **Agent**: wat-pipeline\n"
-            f"- **Key outcomes**: Pipeline run complete — outcome: {outcome}, "
-            f"cost: ${context.total_cost:.4f}, iterations: {context.iteration_count}, "
-            f"time: {time_str}\n"
-            f"- **Open threads**: Review scratch at {context.scratch_dir}/ and code at {context.project_dir}/\n"
-            f"- **Full summary**: inline — auto-logged by vault-librarian\n"
+        # Ensure the file exists with a header
+        try:
+            self.vault.read_file(poc_runs_path)
+        except Exception:
+            header = (
+                "---\n"
+                "type: index\n"
+                f"created: {date_str}\n"
+                f"updated: {date_str}\n"
+                "---\n\n"
+                "# PoC Run Log\n\n"
+                "> One row per WAT pipeline execution. Auto-maintained by vault-librarian.\n"
+                "> Development session history lives in CONVERSATIONS.md.\n\n"
+                "| Date | Slug | Mode | Outcome | Cost | Iterations | Time |\n"
+                "|---|---|---|---|---|---|---|\n"
+            )
+            self.vault.write_file(poc_runs_path, header)
+
+        mode = f"{self.execution_mode}{feedback_tag}"
+        row = (
+            f"| {date_str} | {context.poc_slug} | {mode} "
+            f"| {outcome} | ${context.total_cost:.4f} "
+            f"| {context.iteration_count} | {time_str} |\n"
         )
 
         try:
-            self.vault.append_file(conversations_path, entry)
+            self.vault.append_file(poc_runs_path, row)
             if self.verbose:
-                print(f"📚 Vault-librarian: appended entry to {conversations_path}")
+                print(f"📚 Vault-librarian: logged run to {poc_runs_path}")
         except Exception as e:
             # Non-fatal — pipeline result is already returned, don't mask it
             if self.verbose:
-                print(f"⚠️  Vault-librarian failed to write to {conversations_path}: {e}")
+                print(f"⚠️  Vault-librarian failed to write to {poc_runs_path}: {e}")
 
     def _finalize_project(self, context: AgentContext) -> Dict[str, Any]:
         """
