@@ -59,7 +59,11 @@ def copy_templates(vault_path: Path) -> None:
     copied = 0
     skipped = 0
 
-    for template_file in TEMPLATES_DIR.rglob("*.md"):
+    for template_file in TEMPLATES_DIR.rglob("*"):
+        if template_file.name == ".gitkeep":
+            continue
+        if not template_file.suffix == ".md":
+            continue
         # Compute relative path within templates/vault/
         rel_path = template_file.relative_to(TEMPLATES_DIR)
         dest_path = vault_path / rel_path
