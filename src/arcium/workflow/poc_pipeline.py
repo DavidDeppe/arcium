@@ -752,12 +752,18 @@ Read these files in order:
 5. 01-firm-context/DOMAIN.md
 
 IMPORTANT: Verify Engineer's implementation directly using projects tools:
-- Use projects__list_files("{context.poc_slug}") to check file structure
+- Before writing tests/test_acceptance.py, call projects__list_files("{context.poc_slug}") to record which test files already exist. This lets you distinguish Engineer tests from your own acceptance tests when reporting results.
 - Use projects__check_dependencies("{context.poc_slug}") to validate pyproject.toml
 - Use projects__check_syntax() for each Python file to verify no syntax errors
-- Use projects__run_tests("{context.poc_slug}") to run actual tests
+- Use projects__run_tests("{context.poc_slug}") to run actual tests (Engineer tests only first)
 
 DO NOT trust Engineer's self-reported test results. Run verification yourself.
+
+Then execute the Architect's acceptance tests independently per your skill file:
+- Read the ### Acceptance Test Cases section from {context.specialist_outputs.get('architect')}
+- Translate each TEST-N into a pytest test and write to tests/test_acceptance.py using projects__write_file
+- Run projects__run_tests("{context.poc_slug}") again — pytest will run all tests including yours
+- Report Engineer tests and acceptance tests separately in the Acceptance Test Results section
 
 Review across all six dimensions per your skill file.
 
@@ -775,11 +781,14 @@ critical-count: 0
 high-count: 0
 medium-count: 0
 low-count: 0
+acceptance-tests-passed: 0
+acceptance-tests-failed: 0
 root-cause: design_flaw | implementation_bug | infeasible | null
 requires-human-decision: true | false
 iteration-number: {context.iteration_count + 1}
 ---
 
+Set acceptance-tests-passed and acceptance-tests-failed to the actual counts from running tests/test_acceptance.py.
 Set requires-human-decision to true if substantial HIGH issues need human risk acceptance.
 
 In the markdown body, include:
@@ -788,6 +797,7 @@ In the markdown body, include:
 - High Issues (if any)
 - Medium/Low Issues
 - Strengths
+- Acceptance Test Results (Engineer tests vs. acceptance tests, pass/fail per TEST-N)
 - Root Cause Classification (on FAIL only)
 
 When done, provide Final Answer with your verdict.
@@ -840,25 +850,27 @@ When done, provide Final Answer with your verdict.
 
         if self.verbose:
             print(f"\n✅ Review complete")
-
-
-        print(f"   Verdict: {assessment.verdict}")
-
-
-        print(f"   Confidence: {assessment.confidence}")
-
-
-        print(f"   Critical: {assessment.critical_count}, High: {assessment.high_count}")
-
-
-        print(f"   Report: {report_path}")
-
-
-        print(f"   Cost: ${result.total_cost:.4f}")
+            print(f"   Verdict: {assessment.verdict}")
+            print(f"   Confidence: {assessment.confidence}")
+            print(f"   Critical: {assessment.critical_count}, High: {assessment.high_count}")
+            total_acceptance = assessment.acceptance_tests_passed + assessment.acceptance_tests_failed
+            if total_acceptance > 0:
+                print(f"   Acceptance tests: {assessment.acceptance_tests_passed}/{total_acceptance} passed")
+            print(f"   Report: {report_path}")
+            print(f"   Cost: ${result.total_cost:.4f}")
 
 
 
-        self._write_status(context, f"Review complete - verdict: {assessment.verdict} (iter {context.iteration_count})")
+        total_acceptance = assessment.acceptance_tests_passed + assessment.acceptance_tests_failed
+        if total_acceptance > 0:
+            acceptance_note = f", {assessment.acceptance_tests_passed}/{total_acceptance} acceptance tests passed"
+        else:
+            acceptance_note = ""
+        self._write_status(
+            context,
+            f"Review complete - verdict: {assessment.verdict}"
+            f" (iter {context.iteration_count}{acceptance_note})"
+        )
 
 
 
@@ -892,6 +904,23 @@ When done, provide Final Answer with your verdict.
                     reason=f"Exceeded {self.MAX_ITERATIONS} iteration cycles",
                     target_issues=[]
                 )
+
+        # Acceptance test downgrade: failed acceptance tests override a PASS or PASS_WITH_CONDITIONS
+        if assessment.acceptance_tests_failed > 0:
+            if assessment.verdict == "PASS":
+                if self.verbose:
+                    print(f"   ⚠️  Downgrading PASS → PASS_WITH_CONDITIONS: "
+                          f"{assessment.acceptance_tests_failed} acceptance test(s) failed")
+                assessment.verdict = "PASS_WITH_CONDITIONS"
+                assessment.high_count += assessment.acceptance_tests_failed
+            elif assessment.verdict == "PASS_WITH_CONDITIONS":
+                if self.verbose:
+                    print(f"   ⚠️  PASS_WITH_CONDITIONS confirmed: "
+                          f"{assessment.acceptance_tests_failed} acceptance test(s) failed "
+                          f"— treating as HIGH issue(s)")
+                # Ensure high_count reflects the acceptance test failures so routing handles them
+                if assessment.critical_count == 0:
+                    assessment.high_count = max(assessment.high_count, assessment.acceptance_tests_failed)
 
         # FAIL verdict
         if assessment.verdict == "FAIL":
@@ -1300,11 +1329,16 @@ When done, provide Final Answer with your spot-check verdict.
             return context
 
         # Additional check: Verify PASS verdict
+        # After a polish loop, the terminal verdict is in 03-critic-spotcheck.md, not the
+        # original 03-critic-report.md which may still show PASS_WITH_CONDITIONS.
         try:
-            critic_content = self.vault.read_file(critic_report_path)
-            if "verdict: PASS" not in critic_content.lower():
+            spotcheck_path = context.specialist_outputs.get("critic_spotcheck")
+            verdict_path = spotcheck_path if spotcheck_path else critic_report_path
+            verdict_content = self.vault.read_file(verdict_path)
+            if "verdict: PASS" not in verdict_content.lower():
                 if self.verbose:
-                    print(f"\n⚠️  Critic verdict is not PASS")
+                    source = "spot-check" if spotcheck_path else "critic report"
+                    print(f"\n⚠️  Critic verdict is not PASS (checked {source})")
                     print(f"   Communications phase should only run after successful review")
                     print(f"   Consider this a warning, but proceeding anyway\n")
         except Exception:
