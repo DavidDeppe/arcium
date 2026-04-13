@@ -31,9 +31,11 @@ from . import vault
 from . import agent
 from . import workflow
 from . import projects
+from . import review
 from .agent import ReactAgent, ReActResult, Step, TokenUsage
 from .workflow import PoCPipeline, run_poc_pipeline, run_feedback_pipeline
 from .projects import ProjectTools
+from .review import ArchitectureReviewer, ReviewReport, ReviewFinding
 
 __version__ = "0.1.0"
 __all__ = [
@@ -41,6 +43,7 @@ __all__ = [
     "agent",
     "workflow",
     "projects",
+    "review",
     "ReactAgent",
     "ReActResult",
     "Step",
@@ -49,4 +52,7 @@ __all__ = [
     "run_poc_pipeline",
     "run_feedback_pipeline",
     "ProjectTools",
+    "ArchitectureReviewer",
+    "ReviewReport",
+    "ReviewFinding",
 ]
