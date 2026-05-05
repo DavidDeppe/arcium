@@ -68,6 +68,10 @@ class CriticAssessment:
     summary: str
     strengths: List[str]
 
+    # Acceptance test counts (from YAML frontmatter, optional for backwards compatibility)
+    acceptance_tests_passed: int = 0
+    acceptance_tests_failed: int = 0
+
     @classmethod
     def parse_from_report(cls, report_path: str, vault: VaultTools) -> "CriticAssessment":
         """
@@ -113,6 +117,8 @@ class CriticAssessment:
             high_count=metadata['high-count'],
             medium_count=metadata['medium-count'],
             low_count=metadata['low-count'],
+            acceptance_tests_passed=metadata.get('acceptance-tests-passed', 0),
+            acceptance_tests_failed=metadata.get('acceptance-tests-failed', 0),
             root_cause=metadata.get('root-cause'),
             requires_human_decision=metadata.get('requires-human-decision', False),
             iteration_number=metadata['iteration-number'],
