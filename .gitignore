@@ -44,3 +44,4 @@ config.local.json
 .env
 .env.local
 arcium.config.yaml
+arcium-test/

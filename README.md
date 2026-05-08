@@ -61,11 +61,15 @@ poetry install
 
 The vault is an Obsidian-compatible markdown directory that serves as persistent memory for agents.
 
-```bash
-# Create vault at the default location (~/Documents/arcium-vault)
-python scripts/setup_vault.py
+Create vault at the default location (`~/Documents/arcium-vault`):
 
-# Or specify a custom path
+```bash
+python scripts/setup_vault.py
+```
+
+Or specify a custom path:
+
+```bash
 python scripts/setup_vault.py --vault-path ~/Documents/my-vault
 ```
 
@@ -74,21 +78,24 @@ This creates the full 9-folder vault structure, copies template files, and gener
 
 ### 3. Configure paths
 
+Copy the example config and edit it to set your vault path:
+
 ```bash
 cp arcium.config.example.yaml arcium.config.yaml
-# Edit arcium.config.yaml — set vault.path to your arcium-vault location
 ```
 
-`arcium.config.yaml` is gitignored. Key settings:
+Edit `arcium.config.yaml`:
 
 ```yaml
 vault:
-  path: ~/Documents/arcium-vault  # absolute path to your vault
+  path: ~/Documents/arcium-vault
 
 execution:
-  provider: claude_code           # or 'api' for Anthropic SDK
+  provider: claude_code
   model: default
 ```
+
+`arcium.config.yaml` is gitignored — never commit it.
 
 ### 4. Configure MCP
 
@@ -100,11 +107,11 @@ Run `which poetry` to find your Poetry binary path, then edit `.mcp.json` and re
 
 ### 5. Register with Claude Code
 
-```bash
-# Option A: MCP config file (recommended — persists across sessions)
-# Edit .mcp.json as above, then restart Claude Code
+**Option A** (recommended — persists across sessions): Edit `.mcp.json` as above, then restart Claude Code.
 
-# Option B: claude mcp add command
+**Option B** (one-off command):
+
+```bash
 claude mcp add arcium --command poetry -- run python -m arcium.mcp.server
 ```
 
