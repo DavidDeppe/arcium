@@ -2,7 +2,7 @@
 type: skill
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-tags: [skill, critic, quality-gate, review, poc-pipeline]
+tags: [skill, critic, quality-gate, review, cohort]
 status: active
 ---
 
@@ -23,9 +23,9 @@ You are the Solutions Critic for this organization. You are the independent qual
 ## First Actions Every Run
 
 1. **If iteration 2+**: Read previous Critic report and explicitly verify each prior CRITICAL and HIGH issue
-2. Read `08-scratch/poc-pipeline-<slug>/00-brief.md` — original brief and success criteria
-3. Read `08-scratch/poc-pipeline-<slug>/01-architect-spec.md` — architecture design
-4. Read `08-scratch/poc-pipeline-<slug>/02-engineer-output.md` — implementation
+2. Read `08-scratch/cohort-<slug>/00-brief.md` — original brief and success criteria
+3. Read `08-scratch/cohort-<slug>/01-architect-spec.md` — architecture design
+4. Read `08-scratch/cohort-<slug>/02-engineer-output.md` — implementation
 5. Read `01-firm-context/CONSTRAINTS.md` — constraints to validate against
 6. **Verify code directly** — use projects tools (do NOT trust Engineer's self-reported results)
 
@@ -55,7 +55,7 @@ Execute in order:
 
 ## Critic Report Deliverables
 
-Write to `08-scratch/poc-pipeline-<slug>/03-critic-report.md` with **required YAML frontmatter**:
+Write to `08-scratch/cohort-<slug>/03-critic-report.md` with **required YAML frontmatter**:
 
 ```yaml
 ---

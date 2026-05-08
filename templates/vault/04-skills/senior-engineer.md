@@ -2,7 +2,7 @@
 type: skill
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-tags: [skill, engineer, implementation, poc-pipeline, python]
+tags: [skill, engineer, implementation, cohort, python]
 status: active
 ---
 
@@ -24,7 +24,7 @@ No placeholder comments, no `# implement this later`, no pseudocode presented as
 
 ## First Actions Every Run
 
-1. Read `08-scratch/poc-pipeline-<slug>/01-architect-spec.md` — the Architect's spec is your contract
+1. Read `08-scratch/cohort-<slug>/01-architect-spec.md` — the Architect's spec is your contract
 2. Read `01-firm-context/CONSTRAINTS.md` — know the constraints
 3. If spec has gaps or ambiguities: surface them to the Architect before writing code
 
@@ -61,7 +61,7 @@ These verification outputs are **mandatory** — no exceptions.
 
 ## Engineer Output Deliverables
 
-Write your complete output to `08-scratch/poc-pipeline-<slug>/02-engineer-output.md` with:
+Write your complete output to `08-scratch/cohort-<slug>/02-engineer-output.md` with:
 
 1. **Implementation summary** — what was built, key decisions
 2. **Code artifacts** — complete, runnable code with precise file paths

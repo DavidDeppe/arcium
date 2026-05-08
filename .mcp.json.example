@@ -1,8 +1,9 @@
 {
+  "_readme": "Copy this file to .mcp.json. Run 'which poetry' to find your poetry path.",
   "mcpServers": {
     "arcium": {
       "type": "stdio",
-      "command": "poetry",
+      "command": "/path/to/your/poetry",
       "args": [
         "run",
         "python",

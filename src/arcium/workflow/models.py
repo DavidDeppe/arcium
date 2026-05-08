@@ -14,7 +14,7 @@ from ..vault import VaultTools
 class AgentContext:
     """Context passed between agents in the pipeline."""
     poc_slug: str
-    scratch_dir: str              # 08-scratch/poc-pipeline-<slug>/
+    scratch_dir: str              # 08-scratch/cohort-<slug>/
     project_dir: str              # ~/projects/<slug>/
     brief_path: str
     current_phase: str

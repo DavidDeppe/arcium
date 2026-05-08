@@ -43,3 +43,4 @@ config.local.json
 .mcp.json
 .env
 .env.local
+arcium.config.yaml

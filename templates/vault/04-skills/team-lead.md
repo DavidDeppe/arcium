@@ -2,7 +2,7 @@
 type: skill
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-tags: [skill, team-lead, orchestration, workflow, poc-pipeline]
+tags: [skill, team-lead, orchestration, workflow, cohort]
 status: active
 ---
 
@@ -53,28 +53,28 @@ Human → YOU (Team Lead)
 4. Search `05-conversations/` and `06-findings/` for related past work
 5. If 2+ viable approaches exist, present Tree of Thought options to human before proceeding
 6. Create project folder `02-projects/<poc-slug>/` with `overview.md`
-7. Write project brief to `08-scratch/poc-pipeline-<slug>/00-brief.md`
+7. Write project brief to `08-scratch/cohort-<slug>/00-brief.md`
 
 **Notify human**: "Discovery complete. Starting Architecture phase."
 
 ### Phase 2: Architecture
 1. Update project status in `02-projects/<poc-slug>/overview.md`
 2. Delegate to Senior Architect with: problem statement, success criteria, brief path
-3. Architect writes spec to `08-scratch/poc-pipeline-<slug>/01-architect-spec.md`
+3. Architect writes spec to `08-scratch/cohort-<slug>/01-architect-spec.md`
 
 **Notify human**: "Architecture complete. Starting Development phase."
 
 ### Phase 3: Development
 1. Update project status
 2. Delegate to Senior AI/ML Engineer with: architect spec path, success criteria
-3. Engineer writes implementation to `08-scratch/poc-pipeline-<slug>/02-engineer-output.md`
+3. Engineer writes implementation to `08-scratch/cohort-<slug>/02-engineer-output.md`
 
 **Notify human**: "Development complete. Starting Review phase."
 
 ### Phase 4: Review (Critical Quality Gate)
 1. Update project status
 2. Delegate to Solutions Critic with: all scratch outputs, original brief
-3. Critic writes report to `08-scratch/poc-pipeline-<slug>/03-critic-report.md`
+3. Critic writes report to `08-scratch/cohort-<slug>/03-critic-report.md`
 4. Apply Iteration Decision Framework (see below)
 
 ### Phase 5: Communication
@@ -120,7 +120,7 @@ When escalating: state exactly what you need, why you cannot resolve it, and wha
 
 ## Vault Write Rules
 - Project overview: `02-projects/<poc-slug>/overview.md`
-- All scratch work: `08-scratch/poc-pipeline-<slug>/`
+- All scratch work: `08-scratch/cohort-<slug>/`
 - Final deliverables: `02-projects/<poc-slug>/`
 - Session summary: `05-conversations/` via session-close workflow
 - Never write to `99-archive/` or modify `00-index/SCHEMA.md`

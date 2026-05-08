@@ -75,14 +75,19 @@ This creates the full 9-folder vault structure, copies template files, and gener
 ### 3. Configure paths
 
 ```bash
-cp config.json.example config.json
+cp arcium.config.example.yaml arcium.config.yaml
+# Edit arcium.config.yaml — set vault.path to your arcium-vault location
 ```
 
-Edit `config.json` and set your vault path:
-```json
-{
-  "vault_path": "~/Documents/arcium-vault"
-}
+`arcium.config.yaml` is gitignored. Key settings:
+
+```yaml
+vault:
+  path: ~/Documents/arcium-vault  # absolute path to your vault
+
+execution:
+  provider: claude_code           # or 'api' for Anthropic SDK
+  model: default
 ```
 
 ### 4. Configure MCP
@@ -91,7 +96,7 @@ Edit `config.json` and set your vault path:
 cp .mcp.json.example .mcp.json
 ```
 
-The default `.mcp.json.example` uses `poetry` on your PATH. Edit `.mcp.json` if your Poetry install is in a non-standard location.
+Run `which poetry` to find your Poetry binary path, then edit `.mcp.json` and replace `/path/to/your/poetry` with the result.
 
 ### 5. Register with Claude Code
 
@@ -113,21 +118,38 @@ Edit the following vault files with your organization's context:
 
 ---
 
+## Vault Setup
+
+Arcium requires a vault directory at `~/Documents/arcium-vault` (or the path set in `arcium.config.yaml`). The vault stores agent definitions, skills, tools, and cohort manifests.
+
+Clone the vault:
+
+```bash
+git clone <vault-repo-url> ~/Documents/arcium-vault
+```
+
+Or generate a fresh vault from templates:
+
+```bash
+python scripts/setup_vault.py
+```
+
+---
+
 ## Running Examples
 
 ```bash
-# Run the full WAT pipeline end-to-end (interactive prompts if no args)
-poetry run python examples/run_pipeline.py
-
-# Or invoke directly with arguments
-poetry run python -m arcium.workflow.poc_pipeline \
+# Run a full coordination end-to-end
+poetry run python -m arcium.workflow.cohort_coordinator \
     --idea "Build a word frequency CLI tool" \
-    --slug "word-frequency"
+    --slug "word-frequency" \
+    --cohort poc-generator
 
 # Feedback iteration on an existing PoC (skips Discovery + Architecture)
-poetry run python -m arcium.workflow.poc_pipeline \
+poetry run python -m arcium.workflow.cohort_coordinator \
     --slug "word-frequency" \
-    --feedback "Add CSV export and support stdin"
+    --feedback "Add CSV export and support stdin" \
+    --cohort poc-generator
 
 # Smoke test all MCP tools
 poetry run python examples/smoke_test_mcp.py
@@ -176,7 +198,7 @@ Unified MCP server with 12 tools across two namespaces:
 
 ### `arcium.workflow`
 
-**`PoCPipeline`** — WAT pipeline orchestrating five specialist agents:
+**`CohortCoordinator`** — WAT pipeline orchestrating five specialist agents:
 
 1. **Team Lead** — requirements, project brief, iteration decisions
 2. **Senior Architect** — technical design, architecture spec, MVP scoping
@@ -185,7 +207,7 @@ Unified MCP server with 12 tools across two namespaces:
 5. **Communications Specialist** — stakeholder deliverables (exec summary, deck, position paper)
 
 ```python
-from arcium import run_poc_pipeline
+from arcium.workflow.cohort_coordinator import run_poc_pipeline
 
 result = run_poc_pipeline(
     poc_idea="Build a CLI tool that counts word frequency in text files",
@@ -193,8 +215,8 @@ result = run_poc_pipeline(
 )
 
 print(f"Status: {result['status']}")
-print(f"Code: {result['project_dir']}")
-print(f"Docs: {result['scratch_dir']}")
+print(f"Code: {result['code']}")
+print(f"Deliverables: {result['deliverables']}")
 ```
 
 ### `arcium.config`
@@ -216,7 +238,7 @@ Centralized environment variable loading with sensible defaults:
 
 ### Skill Files
 
-The pipeline loads specialist roles from vault skill files in `04-skills/`:
+The pipeline loads specialist roles from vault agent files in `00-firm/agents/`:
 
 | File | Role |
 |---|---|
@@ -230,15 +252,15 @@ Edit these files in your vault to customize agent behavior. Changes take effect 
 
 ### Scratch Folder Handoff Pattern
 
-Agents collaborate through markdown files in `08-scratch/poc-pipeline-<slug>/`:
+Agents collaborate through markdown files in `08-scratch/cohort-<slug>/`:
 
 ```
-08-scratch/poc-pipeline-word-frequency/
+08-scratch/cohort-word-frequency/
 ├── 00-brief.md              # Team Lead's project brief
 ├── 01-architect-spec.md     # Architect's technical design
 ├── 02-engineer-output.md    # Engineer's implementation notes
 ├── 03-critic-report.md      # Critic's quality assessment (with YAML verdict)
-└── 04-stakeholder-summary.md # Communications deliverable
+└── 03-critic-spotcheck.md   # Critic's spot-check (after polish loop)
 ```
 
 Real code output goes to `~/projects/<slug>/` — outside the vault.
@@ -254,6 +276,8 @@ root-cause: design_flaw | implementation_bug | infeasible | null
 critical-count: 0
 high-count: 0
 requires-human-decision: false
+route_to: communications-specialist | senior-engineer | senior-architect
+route_reason: one sentence explanation
 ---
 ```
 
@@ -278,15 +302,15 @@ The spot-check report is written to `03-critic-spotcheck.md` alongside the origi
 Resume an existing PoC with human feedback without re-running Discovery and Architecture:
 
 ```bash
-# After initial pipeline run on word-frequency
-poetry run python -m arcium.workflow.poc_pipeline \
+poetry run python -m arcium.workflow.cohort_coordinator \
     --slug "word-frequency" \
-    --feedback "Add CSV export and support stdin in addition to file path"
+    --feedback "Add CSV export and support stdin in addition to file path" \
+    --cohort poc-generator
 ```
 
 What happens:
-1. Loads existing Architect spec from `08-scratch/poc-pipeline-<slug>/01-architect-spec.md`
-2. Writes feedback to `08-scratch/poc-pipeline-<slug>/05-feedback-brief.md`
+1. Loads existing Architect spec from `08-scratch/cohort-<slug>/01-architect-spec.md`
+2. Writes feedback to `08-scratch/cohort-<slug>/05-feedback-brief.md`
 3. Skips Team Lead and Architect — routes directly to Engineer
 4. Engineer receives existing spec + feedback as a combined work order
 5. Continues through normal Review → Polish Loop → Communications flow
@@ -295,7 +319,7 @@ Requires that the full pipeline has completed through the Architecture phase for
 If the Architect spec is missing, the pipeline raises a `FileNotFoundError` with instructions.
 
 ```python
-from arcium import run_feedback_pipeline
+from arcium.workflow.cohort_coordinator import run_feedback_pipeline
 
 result = run_feedback_pipeline(
     feedback="Add CSV export and support stdin in addition to file path",
@@ -316,7 +340,7 @@ With all agents in autonomous mode (`ClaudeCodeAgent`), costs are billed to your
 
 ## Using Arcium as a Library
 
-Install Arcium as a path dependency in your own PoC project:
+Install Arcium as a path dependency in your own project:
 
 ```toml
 # your-project/pyproject.toml
@@ -362,26 +386,26 @@ See `arcium-vault/06-findings/claude-code-headless-security.md` for the full sec
 
 ```
 arcium/
-├── AGENTS.md                   # Canonical AI briefing (all tools)
-├── CLAUDE.md                   # One-line redirect to AGENTS.md
-├── .cursorrules                # Cursor IDE briefing
+├── AGENTS.md                       # Canonical AI briefing (all tools)
+├── CLAUDE.md                       # One-line redirect to AGENTS.md
+├── .cursorrules                    # Cursor IDE briefing
 ├── .github/
-│   └── copilot-instructions.md # GitHub Copilot briefing
+│   └── copilot-instructions.md    # GitHub Copilot briefing
 ├── pyproject.toml
 ├── poetry.lock
-├── config.json.example         # Copy to config.json, set vault_path
-├── .mcp.json.example           # Copy to .mcp.json
+├── arcium.config.example.yaml      # Copy to arcium.config.yaml, set vault.path
+├── .mcp.json.example               # Copy to .mcp.json, set poetry path
 ├── scripts/
-│   └── setup_vault.py          # Generates vault + all briefing files
+│   └── setup_vault.py              # Generates vault + all briefing files
 ├── examples/
-│   ├── run_pipeline.py         # End-to-end pipeline demo
-│   ├── smoke_test_mcp.py       # MCP tools smoke test
-│   └── smoke_test_agent.py     # ReactAgent smoke test
+│   ├── run_pipeline.py             # End-to-end pipeline demo
+│   ├── smoke_test_mcp.py           # MCP tools smoke test
+│   └── smoke_test_agent.py         # ReactAgent smoke test
 ├── templates/
-│   └── vault/                  # Sanitized vault templates
+│   └── vault/                      # Sanitized vault templates
 │       ├── 00-index/
 │       ├── 01-firm-context/
-│       ├── 03-agents/workflows/
+│       ├── 00-firm/
 │       └── 04-skills/
 └── src/
     └── arcium/
@@ -395,11 +419,10 @@ arcium/
         │   └── server.py
         ├── projects/
         │   └── tools.py
-        ├── vault/
-        │   ├── tools.py
-        │   └── config.py
         └── workflow/
-            ├── poc_pipeline.py
+            ├── cohort_coordinator.py
+            ├── cohort_resolver.py
+            ├── graph_executor.py
             ├── skill_injector.py
             └── models.py
 ```

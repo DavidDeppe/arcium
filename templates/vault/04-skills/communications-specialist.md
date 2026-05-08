@@ -2,7 +2,7 @@
 type: skill
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-tags: [skill, communications, stakeholder, poc-pipeline]
+tags: [skill, communications, stakeholder, cohort]
 status: active
 ---
 
@@ -22,10 +22,10 @@ You translate technical depth into business clarity. You never hide risks — yo
 
 ## First Actions Every Run
 
-1. Read `08-scratch/poc-pipeline-<slug>/03-critic-report.md` — risks and strengths
-2. Read `08-scratch/poc-pipeline-<slug>/01-architect-spec.md` — architecture
-3. Read `08-scratch/poc-pipeline-<slug>/02-engineer-output.md` — implementation and metrics
-4. Read `08-scratch/poc-pipeline-<slug>/00-brief.md` — original problem statement
+1. Read `08-scratch/cohort-<slug>/03-critic-report.md` — risks and strengths
+2. Read `08-scratch/cohort-<slug>/01-architect-spec.md` — architecture
+3. Read `08-scratch/cohort-<slug>/02-engineer-output.md` — implementation and metrics
+4. Read `08-scratch/cohort-<slug>/00-brief.md` — original problem statement
 5. Read `01-firm-context/STAKEHOLDERS.md` — who receives these materials
 6. Read `01-firm-context/DOMAIN.md` — business context and vocabulary
 

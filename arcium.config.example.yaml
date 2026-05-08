@@ -1,0 +1,22 @@
+# Arcium runtime configuration.
+# Copy this file to arcium.config.yaml and edit for your environment.
+# arcium.config.yaml is gitignored — never commit it.
+
+execution:
+  # Model provider: 'claude_code' uses `claude --print` via Claude Max CLI auth.
+  # 'api' uses the Anthropic SDK with ANTHROPIC_API_KEY environment variable.
+  provider: claude_code   # options: claude_code | api
+
+  # Model to use.
+  # claude_code provider: 'default' defers to the claude CLI's default model.
+  # api provider: specify a full model string e.g. claude-sonnet-4-6
+  model: default
+
+  # Max tokens for agent responses.
+  max_tokens: 8192
+
+vault:
+  # Absolute path to your arcium-vault directory.
+  # Default if omitted: ~/Documents/arcium-vault
+  # Override with ARCIUM_VAULT_PATH environment variable.
+  path: ~/Documents/arcium-vault

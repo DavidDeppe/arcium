@@ -1,5 +1,5 @@
 """
-PoC Pipeline - WAT (Workflows + Agents + Tools) orchestration.
+CohortCoordinator - WAT (Workflows + Agents + Tools) cohort coordination.
 
 Manages the five-agent proof-of-concept development workflow from concept
 to stakeholder deliverables with automatic iteration and quality gates.
@@ -17,11 +17,13 @@ from ..agent.backend import AnthropicBackend
 from ..agent.claude_code_agent import ClaudeCodeAgent
 from .models import AgentContext, IterationDecision, CriticAssessment
 from .skill_injector import SkillInjector
+from .cohort_resolver import CohortManifestResolver
+from .graph_executor import GraphExecutor
 
 
-class PoCPipeline:
+class CohortCoordinator:
     """
-    Main WAT (Workflows + Agents + Tools) pipeline orchestrator.
+    Main WAT (Workflows + Agents + Tools) cohort coordinator.
 
     Manages the five-agent PoC development workflow:
     1. Team Lead - Orchestration and iteration decisions
@@ -47,10 +49,11 @@ class PoCPipeline:
         api_key: Optional[str] = None,
         dev_mode: Optional[bool] = None,
         execution_mode: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        cohort_id: str = 'poc-generator'
     ):
         """
-        Initialize the PoC pipeline.
+        Initialize the CohortCoordinator.
 
         Args:
             vault: VaultTools instance (creates default if None)
@@ -59,7 +62,9 @@ class PoCPipeline:
             dev_mode: DEV_MODE flag (defaults to env var)
             execution_mode: "autonomous" (ClaudeCodeAgent) or "api" (ReactAgent).
                 Defaults to ARCIUM_EXECUTION_MODE env var, then "autonomous".
-            verbose: Whether to log pipeline progress
+            verbose: Whether to log coordination progress
+            cohort_id: Cohort manifest ID to load. Must match a COHORT.md file in
+                the vault's 00-firm/cohorts/ directory. Default: 'poc-generator'.
         """
         # Initialize vault
         if vault is None:
@@ -87,8 +92,19 @@ class PoCPipeline:
         self.verbose = verbose
         self.cost_limit = self.COST_LIMIT_DEV if dev_mode else self.COST_LIMIT_PROD
 
-        # Initialize skill injector
+        # Initialize skill injector (used for firm context pre-loading and legacy agent creation)
         self.injector = SkillInjector(vault, projects)
+
+        # Initialize cohort manifest resolver and load the requested cohort manifest
+        self.cohort_id = cohort_id
+        self._cohort_resolver = CohortManifestResolver(vault_path=str(self.vault.vault_path))
+        self._cohort_manifest = self._cohort_resolver.load_manifest(self.cohort_id)
+
+        # Per-run decision event log — accumulated during the run, written by _vault_librarian
+        self._decision_events: list = []
+
+        # Graph executor — resolves routing decisions from agent verdict files
+        self.graph_executor = GraphExecutor(self._cohort_manifest, str(self.vault.vault_path))
 
         # Store API key for agents
         self.api_key = api_key
@@ -96,7 +112,7 @@ class PoCPipeline:
         if self.verbose:
             mode = "DEV" if dev_mode else "PRODUCTION"
             print(f"\n{'='*80}")
-            print(f"🏗️  POC PIPELINE INITIALIZED ({mode} MODE)")
+            print(f"🏗️  COHORT COORDINATOR INITIALIZED ({mode} MODE)")
             print(f"{'='*80}")
             print(f"💵 Cost Limit: ${self.cost_limit:.2f}")
             print(f"🔄 Max Iterations: {self.MAX_ITERATIONS}")
@@ -105,17 +121,17 @@ class PoCPipeline:
 
     def run(self, poc_idea: str, poc_slug: str) -> Dict[str, Any]:
         """
-        Execute the full PoC pipeline.
+        Execute the full coordination run.
 
         Args:
             poc_idea: High-level PoC concept from human
             poc_slug: URL-safe slug for project folder naming
 
         Returns:
-            Pipeline execution result with paths to deliverables
+            Coordination result with paths to deliverables
 
         Example:
-            >>> result = pipeline.run(
+            >>> result = coordinator.run(
             ...     poc_idea="Build a client email summarization tool using GenAI",
             ...     poc_slug="client-email-summarizer"
             ... )
@@ -147,18 +163,27 @@ class PoCPipeline:
                 # Apply iteration decision framework
                 decision = self._apply_iteration_framework(context, assessment)
 
-                if decision.action == "proceed":
+                # Graph executor resolves routing from Critic verdict file
+                verdict_path = context.specialist_outputs.get("critic")
+                next_node = self.graph_executor.resolve_next_node(
+                    "solutions-critic", verdict_path
+                )
+
+                if next_node == "__escalate__" or decision.action == "escalate_human":
+                    # Max iterations or human decision required
+                    return self._escalate_to_human(context, decision, assessment)
+                elif decision.action == "proceed":
                     # Quality gate passed - proceed to communications
                     break
                 elif decision.action == "polish_engineer":
                     # PASS_WITH_CONDITIONS with only medium/low — one targeted polish pass
                     context = self._polish_iteration(context, assessment)
                     break  # always proceed to Communications after polish (win or fallback)
-                elif decision.action == "escalate_human":
-                    # Need human intervention
-                    return self._escalate_to_human(context, decision, assessment)
+                elif next_node == "senior-architect" or decision.action == "rework_architect":
+                    # Graph or framework routes to Architect
+                    context = self._rework_architect(context, decision, assessment)
                 else:
-                    # Rework needed
+                    # Rework via Engineer (default)
                     context = self._rework_iteration(context, decision)
 
             # Check if we exited due to max iterations
@@ -177,12 +202,12 @@ class PoCPipeline:
             context = self._phase_communications(context)
             self._check_cost_limit(context)
 
-            # Finalize project
+            # Finalize
             return self._finalize_project(context)
 
         except Exception as e:
             if self.verbose:
-                print(f"\n❌ Pipeline error: {e}")
+                print(f"\n❌ Coordination error: {e}")
             raise
 
     def _execute_agent(
@@ -192,7 +217,8 @@ class PoCPipeline:
         system_prompt: str = "",
         role: str = "agent",
         poc_slug: Optional[str] = None,
-        iteration: int = 1
+        iteration: int = 1,
+        tools_filter: str = "all",
     ) -> AgentResult:
         """
         Execute an agent task with unified interface for both backend types.
@@ -204,6 +230,7 @@ class PoCPipeline:
             role: Agent role name
             poc_slug: PoC slug for reasoning logs
             iteration: Iteration number
+            tools_filter: Bundle name passed to ClaudeCodeAgent for --allowedTools filtering
 
         Returns:
             AgentResult with normalized response
@@ -223,7 +250,8 @@ class PoCPipeline:
                 system_prompt=system_prompt,
                 role=role,
                 poc_slug=poc_slug,
-                iteration=iteration
+                iteration=iteration,
+                tools_filter=tools_filter,
             )
             # Convert ClaudeCodeResult to AgentResult
             return AgentResult(
@@ -271,7 +299,7 @@ class PoCPipeline:
         Create project folder structure.
 
         Creates:
-        - 08-scratch/poc-pipeline-<slug>/  (vault, markdown only)
+        - 08-scratch/cohort-<slug>/  (vault, markdown only)
         - ~/projects/<slug>/               (real code)
         - 02-projects/<slug>/             (final deliverables, markdown)
         """
@@ -279,7 +307,7 @@ class PoCPipeline:
             print(f"\n📁 Setting up project structure for: {poc_slug}")
 
         # Create scratch directory in vault
-        scratch_dir = f"08-scratch/poc-pipeline-{poc_slug}"
+        scratch_dir = f"08-scratch/cohort-{poc_slug}"
 
         # Create projects directory (real code, outside vault)
         project_dir = Path.home() / "projects" / poc_slug
@@ -319,7 +347,7 @@ PoC project managed by the WAT pipeline with five specialist agents.
 
 ## Links
 
-- Scratch work: [[08-scratch/poc-pipeline-{poc_slug}]]
+- Scratch work: [[08-scratch/cohort-{poc_slug}]]
 - Real code: `~/projects/{poc_slug}/`
 """
         self.vault.write_file(f"{deliverables_dir}/overview.md", overview_content)
@@ -356,7 +384,7 @@ PoC project managed by the WAT pipeline with five specialist agents.
         # Create Team Lead agent (vault-only tools)
         team_lead = self.injector.create_specialist_agent(
             role="Team Lead",
-            skill_file="04-skills/team-lead.md",
+            skill_file="team-lead",
             tools_filter='vault_only',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -402,11 +430,10 @@ When you're done, provide Final Answer summarizing the brief.
 """
 
         # Run Team Lead
-        # Build system prompt for ClaudeCodeAgent
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/team-lead.md"),
-            tools_filter='vault_only'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "team-lead",
+            {"slug": context.poc_slug, "phase": "discovery", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -415,7 +442,8 @@ When you're done, provide Final Answer summarizing the brief.
             system_prompt=system_prompt,
             role="Team Lead",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='vault_only',
         )
 
         # Update context
@@ -435,6 +463,7 @@ When you're done, provide Final Answer summarizing the brief.
             print(f"   Cost: ${result.total_cost:.4f}")
 
         self._write_status(context, "Discovery complete - project brief created")
+        self._record_decision(1, "discovery", "team-lead", "PROCEED", "brief accepted")
 
         return context
 
@@ -456,7 +485,7 @@ When you're done, provide Final Answer summarizing the brief.
         # Create Architect agent (vault-only tools)
         architect = self.injector.create_specialist_agent(
             role="Senior Architect",
-            skill_file="04-skills/senior-architect.md",
+            skill_file="senior-architect",
             tools_filter='vault_only',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -505,11 +534,10 @@ iteration: {context.iteration_count + 1}
 When done, provide Final Answer summarizing the architecture.
 """
 
-        # Build system prompt for ClaudeCodeAgent
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/senior-architect.md"),
-            tools_filter='vault_only'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "senior-architect",
+            {"slug": context.poc_slug, "phase": "architecture", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -518,7 +546,8 @@ When done, provide Final Answer summarizing the architecture.
             system_prompt=system_prompt,
             role="Senior Architect",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='vault_only',
         )
 
         context.specialist_outputs["architect"] = spec_path
@@ -537,8 +566,7 @@ When done, provide Final Answer summarizing the architecture.
             print(f"   Cost: ${result.total_cost:.4f}")
 
         self._write_status(context, "Architecture complete - spec created")
-
-
+        self._record_decision(context.iteration_count + 1, "architecture", "senior-architect", "PROCEED", "spec complete")
 
         return context
 
@@ -594,7 +622,7 @@ When done, provide Final Answer summarizing the architecture.
         # Create Engineer agent (ALL tools - vault + projects, autonomous mode)
         engineer = self.injector.create_specialist_agent(
             role="Senior AI/ML Engineer",
-            skill_file="04-skills/senior-engineer.md",
+            skill_file="senior-engineer",
             tools_filter='all',
             execution_mode=self.execution_mode,  # ClaudeCodeAgent or ReactAgent
             api_key=self.api_key,
@@ -670,12 +698,10 @@ project-dir: {context.project_dir}
 When done, provide Final Answer summarizing what was built.
 """
 
-        # Build system prompt for ClaudeCodeAgent
-        # Note: SkillInjector already builds this with firm context + skill content
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/senior-engineer.md"),
-            tools_filter='all'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "senior-engineer",
+            {"slug": context.poc_slug, "phase": "development", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -684,7 +710,8 @@ When done, provide Final Answer summarizing what was built.
             system_prompt=system_prompt,
             role="Senior AI/ML Engineer",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='all',
         )
 
         context.specialist_outputs["engineer"] = output_path
@@ -707,8 +734,7 @@ When done, provide Final Answer summarizing what was built.
 
 
         self._write_status(context, f"Development complete (iter {context.iteration_count})")
-
-
+        self._record_decision(context.iteration_count + 1, "development", "senior-engineer", "COMPLETE", "implementation delivered")
 
         return context
 
@@ -730,7 +756,7 @@ When done, provide Final Answer summarizing what was built.
         # Create Critic agent (ALL tools - needs projects tools to verify implementation, autonomous mode)
         critic = self.injector.create_specialist_agent(
             role="Solutions Critic",
-            skill_file="04-skills/solutions-critic.md",
+            skill_file="solutions-critic",
             tools_filter='all',
             execution_mode=self.execution_mode,  # ClaudeCodeAgent or ReactAgent
             api_key=self.api_key,
@@ -803,11 +829,10 @@ In the markdown body, include:
 When done, provide Final Answer with your verdict.
 """
 
-        # Build system prompt for ClaudeCodeAgent
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/solutions-critic.md"),
-            tools_filter='all'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "solutions-critic",
+            {"slug": context.poc_slug, "phase": "review", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -816,7 +841,8 @@ When done, provide Final Answer with your verdict.
             system_prompt=system_prompt,
             role="Solutions Critic",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='all',
         )
 
         context.specialist_outputs["critic"] = report_path
@@ -872,7 +898,19 @@ When done, provide Final Answer with your verdict.
             f" (iter {context.iteration_count}{acceptance_note})"
         )
 
-
+        # Build detail string for decision log
+        _review_parts = []
+        if assessment.critical_count:
+            _review_parts.append(f"{assessment.critical_count} critical")
+        if assessment.high_count:
+            _review_parts.append(f"{assessment.high_count} high")
+        if total_acceptance:
+            _review_parts.append(f"{assessment.acceptance_tests_passed}/{total_acceptance} tests")
+        _review_detail = ", ".join(_review_parts) if _review_parts else "no blocking issues"
+        self._record_decision(
+            context.iteration_count + 1, "review", "solutions-critic",
+            assessment.verdict, _review_detail
+        )
 
         return context, assessment
 
@@ -894,7 +932,7 @@ When done, provide Final Answer with your verdict.
             print(f"\n🤔 Applying iteration decision framework...")
 
         # Check iteration limit
-        if context.iteration_count >= self.MAX_ITERATIONS - 1:  # -1 because we increment before rework
+        if context.iteration_count >= self.MAX_ITERATIONS:
             if self.verbose:
                 print(f"   ⚠️  At maximum iterations ({self.MAX_ITERATIONS})")
 
@@ -924,34 +962,36 @@ When done, provide Final Answer with your verdict.
 
         # FAIL verdict
         if assessment.verdict == "FAIL":
-            if assessment.has_critical_issues():
-                critical_issues = assessment.get_issues_by_severity("critical")
+            blocking_issues = (
+                assessment.get_issues_by_severity("critical")
+                or assessment.get_issues_by_severity("high")
+            )
 
-                # Route based on root cause
-                if assessment.root_cause == "design_flaw":
-                    if self.verbose:
-                        print(f"   🔄 FAIL: Design flaw → Routing to Architect")
-                    return IterationDecision(
-                        action="rework_architect",
-                        reason="Critical issues stem from architectural design",
-                        target_issues=[i.title for i in critical_issues]
-                    )
-                elif assessment.root_cause == "implementation_bug":
-                    if self.verbose:
-                        print(f"   🔄 FAIL: Implementation bug → Routing to Engineer")
-                    return IterationDecision(
-                        action="rework_engineer",
-                        reason="Critical issues stem from implementation bugs",
-                        target_issues=[i.title for i in critical_issues]
-                    )
-                else:  # infeasible
-                    if self.verbose:
-                        print(f"   🚫 FAIL: Infeasible → Escalating to human")
-                    return IterationDecision(
-                        action="escalate_human",
-                        reason="Fundamental feasibility concerns require human decision",
-                        target_issues=[i.title for i in critical_issues]
-                    )
+            # Route based on root cause
+            if assessment.root_cause == "design_flaw":
+                if self.verbose:
+                    print(f"   🔄 FAIL: Design flaw → Routing to Architect")
+                return IterationDecision(
+                    action="rework_architect",
+                    reason="Issues stem from architectural design",
+                    target_issues=[i.title for i in blocking_issues]
+                )
+            elif assessment.root_cause == "infeasible":
+                if self.verbose:
+                    print(f"   🚫 FAIL: Infeasible → Escalating to human")
+                return IterationDecision(
+                    action="escalate_human",
+                    reason="Fundamental feasibility concerns require human decision",
+                    target_issues=[i.title for i in blocking_issues]
+                )
+            else:  # implementation_bug or unset
+                if self.verbose:
+                    print(f"   🔄 FAIL: Implementation bug → Routing to Engineer")
+                return IterationDecision(
+                    action="rework_engineer",
+                    reason="Issues stem from implementation bugs",
+                    target_issues=[i.title for i in blocking_issues]
+                )
 
         # PASS_WITH_CONDITIONS
         elif assessment.verdict == "PASS_WITH_CONDITIONS":
@@ -1025,6 +1065,37 @@ When done, provide Final Answer with your verdict.
 
         return context
 
+    def _rework_architect(
+        self,
+        context: AgentContext,
+        decision: IterationDecision,
+        assessment: CriticAssessment,
+    ) -> AgentContext:
+        """
+        Route back to Architect when the Critic identifies a design gap.
+
+        Differs from _rework_iteration in that it re-runs Architecture first,
+        then Development — the Engineer re-implements against the revised spec.
+        Increments iteration_count once (same accounting as _rework_iteration).
+        """
+        context.iteration_count += 1
+
+        if self.verbose:
+            print(f"\n{'='*80}")
+            print(f"🔄 REWORK ITERATION {context.iteration_count} — ARCHITECT REWORK (design gap)")
+            print(f"{'='*80}")
+            print(f"   Reason: {decision.reason}")
+            if decision.target_issues:
+                print(f"   Issues: {', '.join(decision.target_issues[:3])}...")
+            print()
+
+        # Re-run Architecture with Critic findings in scope
+        context = self._phase_architecture(context)
+        # Then re-run Development against the revised spec
+        context = self._phase_development(context)
+
+        return context
+
     def _polish_iteration(
         self,
         context: AgentContext,
@@ -1089,7 +1160,7 @@ When done, provide Final Answer with your verdict.
 
         engineer = self.injector.create_specialist_agent(
             role="Senior AI/ML Engineer",
-            skill_file="04-skills/senior-engineer.md",
+            skill_file="senior-engineer",
             tools_filter='all',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -1150,10 +1221,10 @@ project-dir: {context.project_dir}
 When done, provide Final Answer summarizing the fixes applied.
 """
 
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/senior-engineer.md"),
-            tools_filter='all'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "senior-engineer",
+            {"slug": context.poc_slug, "phase": "polish", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -1162,11 +1233,13 @@ When done, provide Final Answer summarizing the fixes applied.
             system_prompt=system_prompt,
             role="Senior AI/ML Engineer",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='all',
         )
 
         context.total_cost += result.total_cost
         context.current_phase = "polish_complete"
+        self._record_decision(context.iteration_count + 1, "polish", "senior-engineer", "COMPLETE", f"{len(issues)} issues addressed")
 
         if self.verbose:
             print(f"\n✅ Engineer polish complete")
@@ -1192,7 +1265,7 @@ When done, provide Final Answer summarizing the fixes applied.
 
         critic = self.injector.create_specialist_agent(
             role="Solutions Critic",
-            skill_file="04-skills/solutions-critic.md",
+            skill_file="solutions-critic",
             tools_filter='all',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -1251,10 +1324,10 @@ In the body:
 When done, provide Final Answer with your spot-check verdict.
 """
 
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/solutions-critic.md"),
-            tools_filter='all'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "solutions-critic",
+            {"slug": context.poc_slug, "phase": "spotcheck", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -1263,7 +1336,8 @@ When done, provide Final Answer with your spot-check verdict.
             system_prompt=system_prompt,
             role="Solutions Critic",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='all',
         )
 
         context.total_cost += result.total_cost
@@ -1296,6 +1370,7 @@ When done, provide Final Answer with your spot-check verdict.
             context,
             f"Spot-check complete — verdict: {spotcheck.verdict}"
         )
+        self._record_decision(context.iteration_count + 1, "spotcheck", "solutions-critic", spotcheck.verdict, "spot-check")
 
         if self.verbose:
             print(f"   Verdict: {spotcheck.verdict}")
@@ -1335,7 +1410,12 @@ When done, provide Final Answer with your spot-check verdict.
             spotcheck_path = context.specialist_outputs.get("critic_spotcheck")
             verdict_path = spotcheck_path if spotcheck_path else critic_report_path
             verdict_content = self.vault.read_file(verdict_path)
-            if "verdict: PASS" not in verdict_content.lower():
+            # Match "verdict: PASS" exactly — lowercase both sides, then check the line ends
+            # after "pass" so "verdict: PASS_WITH_CONDITIONS" does not suppress the warning.
+            if not any(
+                line.strip() == "verdict: pass"
+                for line in verdict_content.lower().splitlines()
+            ):
                 if self.verbose:
                     source = "spot-check" if spotcheck_path else "critic report"
                     print(f"\n⚠️  Critic verdict is not PASS (checked {source})")
@@ -1347,7 +1427,7 @@ When done, provide Final Answer with your spot-check verdict.
         # Create Communications agent (vault-only tools)
         communicator = self.injector.create_specialist_agent(
             role="Communications Specialist",
-            skill_file="04-skills/communications-specialist.md",
+            skill_file="communications-specialist",
             tools_filter='vault_only',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -1389,11 +1469,10 @@ Include Critic's risks transparently in all deliverables.
 When done, provide Final Answer listing all deliverables created.
 """
 
-        # Build system prompt for ClaudeCodeAgent
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/communications-specialist.md"),
-            tools_filter='vault_only'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "communications-specialist",
+            {"slug": context.poc_slug, "phase": "communications", "iteration": context.iteration_count + 1},
         )
 
         result = self._execute_agent(
@@ -1402,7 +1481,8 @@ When done, provide Final Answer listing all deliverables created.
             system_prompt=system_prompt,
             role="Communications Specialist",
             poc_slug=context.poc_slug,
-            iteration=context.iteration_count + 1
+            iteration=context.iteration_count + 1,
+            tools_filter='vault_only',
         )
 
         context.specialist_outputs["communicator"] = deliverables_dir
@@ -1421,8 +1501,7 @@ When done, provide Final Answer listing all deliverables created.
 
 
         self._write_status(context, "Communications complete - stakeholder deliverables created")
-
-
+        self._record_decision(context.iteration_count + 1, "communications", "communications-specialist", "COMPLETE", "")
 
         return context
 
@@ -1479,20 +1558,41 @@ When done, provide Final Answer listing all deliverables created.
 
         return result
 
+    def _record_decision(
+        self,
+        iteration: int,
+        phase: str,
+        agent: str,
+        decision: str,
+        detail: str = "",
+    ) -> None:
+        """Append one event to the per-run decision log. Never raises."""
+        try:
+            self._decision_events.append({
+                "iteration": iteration,
+                "phase": phase,
+                "agent": agent,
+                "decision": decision,
+                "detail": detail,
+            })
+        except Exception:
+            pass
+
     def _vault_librarian(self, context: AgentContext, outcome: str) -> None:
         """
-        Lightweight vault-librarian: appends one row to 00-index/POC-RUNS.md.
+        Lightweight vault-librarian: appends one row to 00-index/COHORT-RUNS.md
+        and one structured entry to 00-index/COHORT-DECISIONS.md.
 
-        PoC execution history is separate from Arcium development history
-        (CONVERSATIONS.md). POC-RUNS.md is a simple table — one row per run.
+        Cohort execution history is separate from Arcium development history
+        (CONVERSATIONS.md). COHORT-RUNS.md is a simple table — one row per run.
 
-        Creates POC-RUNS.md with a table header if the file doesn't exist yet.
+        Creates COHORT-RUNS.md with a table header if the file doesn't exist yet.
 
         Args:
             context: Final pipeline context
             outcome: Short outcome string, e.g. "completed" or "escalated — FAIL"
         """
-        poc_runs_path = "00-index/POC-RUNS.md"
+        cohort_runs_path = "00-index/COHORT-RUNS.md"
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M")
@@ -1500,7 +1600,7 @@ When done, provide Final Answer listing all deliverables created.
 
         # Ensure the file exists with a header
         try:
-            self.vault.read_file(poc_runs_path)
+            self.vault.read_file(cohort_runs_path)
         except Exception:
             header = (
                 "---\n"
@@ -1508,13 +1608,13 @@ When done, provide Final Answer listing all deliverables created.
                 f"created: {date_str}\n"
                 f"updated: {date_str}\n"
                 "---\n\n"
-                "# PoC Run Log\n\n"
-                "> One row per WAT pipeline execution. Auto-maintained by vault-librarian.\n"
+                "# Cohort Run Log\n\n"
+                "> One row per WAT cohort execution. Auto-maintained by vault-librarian.\n"
                 "> Development session history lives in CONVERSATIONS.md.\n\n"
                 "| Date | Slug | Mode | Outcome | Cost | Iterations | Time |\n"
                 "|---|---|---|---|---|---|---|\n"
             )
-            self.vault.write_file(poc_runs_path, header)
+            self.vault.write_file(cohort_runs_path, header)
 
         mode = f"{self.execution_mode}{feedback_tag}"
         row = (
@@ -1524,13 +1624,96 @@ When done, provide Final Answer listing all deliverables created.
         )
 
         try:
-            self.vault.append_file(poc_runs_path, row)
+            self.vault.append_file(cohort_runs_path, row)
             if self.verbose:
-                print(f"📚 Vault-librarian: logged run to {poc_runs_path}")
+                print(f"📚 Vault-librarian: logged run to {cohort_runs_path}")
         except Exception as e:
             # Non-fatal — pipeline result is already returned, don't mask it
             if self.verbose:
-                print(f"⚠️  Vault-librarian failed to write to {poc_runs_path}: {e}")
+                print(f"⚠️  Vault-librarian failed to write to {cohort_runs_path}: {e}")
+
+        self._log_cohort_decisions(context, outcome, now)
+
+    def _log_cohort_decisions(self, context: AgentContext, outcome: str, now: datetime) -> None:
+        """
+        Appends a structured decision entry to COHORT-DECISIONS.md.
+        Called by _vault_librarian() on every coordination exit.
+
+        Records agent verdicts and routing outcomes for audit — one row per
+        agent execution event. Multi-iteration runs preserve full play-by-play.
+        Does not record agent outputs or content — decisions only.
+        Failures are logged silently — never raise from this method.
+        """
+        try:
+            decisions_path = "00-index/COHORT-DECISIONS.md"
+            date_str = now.strftime("%Y-%m-%d")
+            time_str = now.strftime("%H:%M")
+            run_id = now.strftime("%Y%m%d-%H%M%S")
+
+            # Ensure file exists
+            try:
+                self.vault.read_file(decisions_path)
+            except Exception:
+                header = (
+                    "---\n"
+                    "type: index\n"
+                    f"created: {date_str}\n"
+                    f"updated: {date_str}\n"
+                    "tags: [index, decisions, audit, cohort-log]\n"
+                    "auto-managed: true\n"
+                    "---\n\n"
+                    "# Cohort Decision Log\n\n"
+                    "One entry per cohort coordination run. Records every significant agent\n"
+                    "decision within a run — verdicts, routing outcomes, escalations.\n\n"
+                    "This log complements COHORT-RUNS.md (run-level summary) with decision-level\n"
+                    "detail. Together they answer: what ran, what was decided, and why.\n\n"
+                    "---\n\n"
+                    "No entries yet — _vault_librarian() will append them at runtime.\n"
+                )
+                self.vault.write_file(decisions_path, header)
+
+            # Build routing source index from graph executor log
+            # Key: (from_node, iteration) → source tag
+            routing_source_index: dict = {}
+            for entry in self.graph_executor.get_routing_log():
+                key = (entry["from"], entry["iteration"])
+                routing_source_index[key] = entry["source"]
+
+            # Build per-event rows from accumulated _decision_events
+            rows = []
+            for ev in self._decision_events:
+                detail = ev.get("detail", "")
+                # Annotate review/spotcheck rows with routing source
+                if ev["phase"] in ("review", "spotcheck"):
+                    src_key = ("solutions-critic", ev["iteration"])
+                    src = routing_source_index.get(src_key)
+                    if src == "agent":
+                        detail = f"{detail} [agent-routed]".strip()
+                    elif src == "default":
+                        detail = f"{detail} [default]".strip()
+                rows.append(
+                    f"| {ev['iteration']} | {ev['phase']} | {ev['agent']}"
+                    f" | {ev['decision']} | {detail} |"
+                )
+
+            table_header = "| Iteration | Phase | Agent | Decision | Detail |\n|---|---|---|---|---|"
+            table_body = "\n".join(rows) if rows else "| — | — | — | — | no events recorded |"
+
+            entry = (
+                f"\n## [{date_str} {time_str}] {context.poc_slug}"
+                f" · run-id: {run_id}"
+                f" · cohort: {self._cohort_manifest.id} v{self._cohort_manifest.version}\n\n"
+                f"{table_header}\n{table_body}\n\n"
+                f"**Outcome:** {outcome}"
+                f" · **Iterations:** {context.iteration_count}"
+                f" · **Cost:** ${context.total_cost:.4f}\n\n"
+                "---\n"
+            )
+
+            self.vault.append_file(decisions_path, entry)
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️  Vault-librarian failed to write to COHORT-DECISIONS.md: {e}")
 
     def _finalize_project(self, context: AgentContext) -> Dict[str, Any]:
         """
@@ -1571,7 +1754,7 @@ When done, provide Final Answer listing all deliverables created.
 
         if self.verbose:
             print(f"\n{'='*80}")
-            print("✅ POC PIPELINE COMPLETE")
+            print("✅ COHORT COORDINATION COMPLETE")
             print(f"{'='*80}")
             print(f"\nProject: {context.poc_slug}")
             print(f"Total Cost: ${context.total_cost:.2f}")
@@ -1600,7 +1783,7 @@ When done, provide Final Answer listing all deliverables created.
             poc_slug: Slug of the existing PoC (must have completed Architecture phase)
 
         Returns:
-            Pipeline execution result (same shape as run())
+            Coordination result (same shape as run())
 
         Raises:
             FileNotFoundError: If the Architect spec does not exist for this slug
@@ -1639,13 +1822,20 @@ When done, provide Final Answer listing all deliverables created.
 
                 decision = self._apply_iteration_framework(context, assessment)
 
-                if decision.action == "proceed":
+                verdict_path = context.specialist_outputs.get("critic")
+                next_node = self.graph_executor.resolve_next_node(
+                    "solutions-critic", verdict_path
+                )
+
+                if next_node == "__escalate__" or decision.action == "escalate_human":
+                    return self._escalate_to_human(context, decision, assessment)
+                elif decision.action == "proceed":
                     break
                 elif decision.action == "polish_engineer":
                     context = self._polish_iteration(context, assessment)
                     break
-                elif decision.action == "escalate_human":
-                    return self._escalate_to_human(context, decision, assessment)
+                elif next_node == "senior-architect" or decision.action == "rework_architect":
+                    context = self._rework_architect(context, decision, assessment)
                 else:
                     context = self._rework_iteration(context, decision)
 
@@ -1668,7 +1858,7 @@ When done, provide Final Answer listing all deliverables created.
 
         except Exception as e:
             if self.verbose:
-                print(f"\n❌ Feedback pipeline error: {e}")
+                print(f"\n❌ Feedback coordination error: {e}")
             raise
 
     def _load_existing_context(self, poc_slug: str, feedback: str) -> AgentContext:
@@ -1678,7 +1868,7 @@ When done, provide Final Answer listing all deliverables created.
         Raises:
             FileNotFoundError: If the Architect spec does not exist for this slug
         """
-        scratch_dir = f"08-scratch/poc-pipeline-{poc_slug}"
+        scratch_dir = f"08-scratch/cohort-{poc_slug}"
         spec_path = f"{scratch_dir}/01-architect-spec.md"
         brief_path = f"{scratch_dir}/00-brief.md"
         project_dir = str(Path.home() / "projects" / poc_slug)
@@ -1758,7 +1948,7 @@ Do not deviate from the original architecture unless the feedback explicitly req
 
         engineer = self.injector.create_specialist_agent(
             role="Senior AI/ML Engineer",
-            skill_file="04-skills/senior-engineer.md",
+            skill_file="senior-engineer",
             tools_filter='all',
             execution_mode=self.execution_mode,
             api_key=self.api_key,
@@ -1814,10 +2004,10 @@ Include:
 When done, provide Final Answer summarizing the feedback changes applied.
 """
 
-        system_prompt = self.injector._build_system_prompt(
-            firm_context=self.injector._load_firm_context(),
-            skill_content=self.injector.load_skill("04-skills/senior-engineer.md"),
-            tools_filter='all'
+        system_prompt, _ = self._cohort_resolver.compose_system_prompt(
+            self._cohort_manifest,
+            "senior-engineer",
+            {"slug": context.poc_slug, "phase": "feedback", "iteration": 1},
         )
 
         result = self._execute_agent(
@@ -1826,7 +2016,8 @@ When done, provide Final Answer summarizing the feedback changes applied.
             system_prompt=system_prompt,
             role="Senior AI/ML Engineer",
             poc_slug=context.poc_slug,
-            iteration=1
+            iteration=1,
+            tools_filter='all',
         )
 
         context.specialist_outputs["engineer"] = output_path
@@ -1845,25 +2036,27 @@ When done, provide Final Answer summarizing the feedback changes applied.
         return context
 
 
-# Convenience function
+# Convenience functions
 def run_poc_pipeline(
     poc_idea: str,
     poc_slug: str,
     api_key: Optional[str] = None,
     dev_mode: Optional[bool] = None,
-    execution_mode: Optional[str] = None
+    execution_mode: Optional[str] = None,
+    cohort_id: str = 'poc-generator'
 ) -> Dict[str, Any]:
     """
-    Run the complete PoC pipeline with default settings.
+    Run a cohort coordination with default settings.
 
     Args:
         poc_idea: High-level PoC concept
         poc_slug: URL-safe project slug
         api_key: Anthropic API key (optional, defaults to env var)
         dev_mode: Use DEV_MODE for cost control (optional, defaults to env var)
+        cohort_id: Cohort manifest ID to run (default: 'poc-generator')
 
     Returns:
-        Pipeline result with deliverable paths or escalation details
+        Coordination result with deliverable paths or escalation details
 
     Example:
         >>> result = run_poc_pipeline(
@@ -1874,8 +2067,8 @@ def run_poc_pipeline(
         >>> if result["status"] == "completed":
         ...     print(result["deliverables"])
     """
-    pipeline = PoCPipeline(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode)
-    return pipeline.run(poc_idea, poc_slug)
+    coordinator = CohortCoordinator(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode, cohort_id=cohort_id)
+    return coordinator.run(poc_idea, poc_slug)
 
 
 def run_feedback_pipeline(
@@ -1883,7 +2076,8 @@ def run_feedback_pipeline(
     poc_slug: str,
     api_key: Optional[str] = None,
     dev_mode: Optional[bool] = None,
-    execution_mode: Optional[str] = None
+    execution_mode: Optional[str] = None,
+    cohort_id: str = 'poc-generator'
 ) -> Dict[str, Any]:
     """
     Resume an existing PoC with human feedback, skipping Discovery and Architecture.
@@ -1894,41 +2088,42 @@ def run_feedback_pipeline(
         api_key: Anthropic API key (optional, defaults to env var)
         dev_mode: Use DEV_MODE for cost control (optional, defaults to env var)
         execution_mode: "autonomous" or "api" (optional, defaults to env var)
+        cohort_id: Cohort manifest ID to run (default: 'poc-generator')
 
     Returns:
-        Pipeline result with deliverable paths or escalation details
+        Coordination result with deliverable paths or escalation details
 
     Raises:
         FileNotFoundError: If the Architect spec does not exist for this slug
     """
-    pipeline = PoCPipeline(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode)
-    return pipeline.run_with_feedback(feedback, poc_slug)
+    coordinator = CohortCoordinator(api_key=api_key, dev_mode=dev_mode, execution_mode=execution_mode, cohort_id=cohort_id)
+    return coordinator.run_with_feedback(feedback, poc_slug)
 
 
 def _cli_main() -> None:
-    """CLI entry point: poetry run python -m arcium.workflow.poc_pipeline"""
+    """CLI entry point: python -m arcium.workflow.cohort_coordinator"""
     import argparse
     import json
     import sys
 
     parser = argparse.ArgumentParser(
-        prog="arcium.workflow.poc_pipeline",
-        description="Run the Arcium WAT Pipeline to build a PoC end-to-end.",
+        prog="arcium.workflow.cohort_coordinator",
+        description="Run the Arcium CohortCoordinator to build a PoC end-to-end.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # New PoC — full pipeline
-  poetry run python -m arcium.workflow.poc_pipeline \\
+  # New PoC — full coordination run
+  python -m arcium.workflow.cohort_coordinator \\
       --idea "Build a CLI tool that counts word frequency in a text file" \\
       --slug "word-frequency"
 
   # Feedback iteration — skips Discovery and Architecture
-  poetry run python -m arcium.workflow.poc_pipeline \\
+  python -m arcium.workflow.cohort_coordinator \\
       --slug "word-frequency" \\
       --feedback "Add CSV export and support stdin in addition to file path"
 
   # New PoC using Anthropic API instead of Claude Code CLI
-  poetry run python -m arcium.workflow.poc_pipeline \\
+  python -m arcium.workflow.cohort_coordinator \\
       --idea "Summarize client emails using the Anthropic API" \\
       --slug "email-summarizer" \\
       --mode api
@@ -1978,6 +2173,12 @@ Environment variables:
         default=None,
         help="Enable DEV_MODE (Haiku model, $2 cost cap). Overrides DEV_MODE env var.",
     )
+    parser.add_argument(
+        "--cohort",
+        type=str,
+        default="poc-generator",
+        help="Cohort ID to run. Must match a COHORT.md file in the vault. Default: poc-generator",
+    )
 
     args = parser.parse_args()
     dev_mode = args.dev if args.dev else None  # None → read from env
@@ -1989,7 +2190,7 @@ Environment variables:
             sys.exit(1)
 
         print("=" * 80)
-        print("WAT PIPELINE — FEEDBACK ITERATION")
+        print("WAT COHORT — FEEDBACK ITERATION")
         print("=" * 80)
         print(f"Slug     : {args.slug}")
         print(f"Feedback : {args.feedback[:80]}{'...' if len(args.feedback) > 80 else ''}")
@@ -2003,12 +2204,13 @@ Environment variables:
                 poc_slug=args.slug,
                 execution_mode=args.mode,
                 dev_mode=dev_mode,
+                cohort_id=args.cohort,
             )
         except FileNotFoundError as exc:
             print(f"\nError: {exc}", file=sys.stderr)
             sys.exit(1)
         except Exception as exc:
-            print(f"\nPipeline error: {exc}", file=sys.stderr)
+            print(f"\nCoordination error: {exc}", file=sys.stderr)
             sys.exit(1)
 
     # ---- New PoC path ----
@@ -2027,7 +2229,7 @@ Environment variables:
             poc_slug = input(f"PoC slug [{default_slug}]: ").strip() or default_slug
 
         print("=" * 80)
-        print("WAT PIPELINE — NEW POC")
+        print("WAT COHORT — NEW POC")
         print("=" * 80)
         print(f"Idea : {poc_idea}")
         print(f"Slug : {poc_slug}")
@@ -2041,9 +2243,10 @@ Environment variables:
                 poc_slug=poc_slug,
                 execution_mode=args.mode,
                 dev_mode=dev_mode,
+                cohort_id=args.cohort,
             )
         except Exception as exc:
-            print(f"\nPipeline error: {exc}", file=sys.stderr)
+            print(f"\nCoordination error: {exc}", file=sys.stderr)
             sys.exit(1)
 
     print()

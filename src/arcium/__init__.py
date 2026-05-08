@@ -33,7 +33,7 @@ from . import workflow
 from . import projects
 from . import review
 from .agent import ReactAgent, ReActResult, Step, TokenUsage
-from .workflow import PoCPipeline, run_poc_pipeline, run_feedback_pipeline
+from .workflow import CohortCoordinator
 from .projects import ProjectTools
 from .review import ArchitectureReviewer, ReviewReport, ReviewFinding
 
@@ -48,9 +48,7 @@ __all__ = [
     "ReActResult",
     "Step",
     "TokenUsage",
-    "PoCPipeline",
-    "run_poc_pipeline",
-    "run_feedback_pipeline",
+    "CohortCoordinator",
     "ProjectTools",
     "ArchitectureReviewer",
     "ReviewReport",

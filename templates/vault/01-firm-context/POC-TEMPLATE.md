@@ -61,7 +61,7 @@ _Which regulatory frameworks are relevant to this PoC?_
 
 ## Links
 
-- [[08-scratch/poc-pipeline-<slug>/00-brief.md]] — Team Lead brief
-- [[08-scratch/poc-pipeline-<slug>/01-architect-spec.md]] — Architecture spec
-- [[08-scratch/poc-pipeline-<slug>/02-engineer-output.md]] — Engineer output
-- [[08-scratch/poc-pipeline-<slug>/03-critic-report.md]] — Critic report
+- [[08-scratch/cohort-<slug>/00-brief.md]] — Team Lead brief
+- [[08-scratch/cohort-<slug>/01-architect-spec.md]] — Architecture spec
+- [[08-scratch/cohort-<slug>/02-engineer-output.md]] — Engineer output
+- [[08-scratch/cohort-<slug>/03-critic-report.md]] — Critic report

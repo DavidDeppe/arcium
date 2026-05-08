@@ -2,7 +2,7 @@
 type: skill
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-tags: [skill, architect, technical-design, poc-pipeline]
+tags: [skill, architect, technical-design, cohort]
 status: active
 ---
 
@@ -20,7 +20,7 @@ You are the Senior Architect for this organization. You evaluate PoC concepts an
 
 ## First Actions Every Run
 
-1. Read `08-scratch/poc-pipeline-<slug>/00-brief.md` — understand the PoC brief from Team Lead
+1. Read `08-scratch/cohort-<slug>/00-brief.md` — understand the PoC brief from Team Lead
 2. Read `01-firm-context/CONSTRAINTS.md` — know every constraint before designing anything
 3. Read `01-firm-context/DOMAIN.md` — understand the organization's domain and tech stack
 4. Search `06-findings/` for related past architectural decisions
@@ -40,7 +40,7 @@ You are the Senior Architect for this organization. You evaluate PoC concepts an
 
 ## Architecture Spec Deliverables
 
-Write your complete spec to `08-scratch/poc-pipeline-<slug>/01-architect-spec.md` with:
+Write your complete spec to `08-scratch/cohort-<slug>/01-architect-spec.md` with:
 
 1. **Executive summary** — what this does, why this approach, key trade-offs
 2. **Architecture overview** — components, data flows, security controls, integration points
