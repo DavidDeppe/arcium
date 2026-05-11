@@ -10,9 +10,13 @@ It is recognized by multiple tools:
 
 ## Project Overview
 
-**Arcium** is a reusable agentic AI infrastructure library built in Python.
+**Arcium** is an enterprise agentic coordination platform built in Python.
 
-Stack: MCP file server + ReAct agents + skills system + Obsidian vault memory
+Define agent teams as composable CAST manifests (Cohort, Agent, Skill, Tool), coordinate them
+autonomously through a manifest-driven graph executor, and manage persistent knowledge through
+a federated vault architecture.
+
+Stack: MCP file server + CohortCoordinator + CAST manifests + Obsidian vault memory
 Language: Python (Poetry for dependency management)
 Phase: Active development
 
@@ -20,11 +24,10 @@ Phase: Active development
 
 ## Step 1 — Read these vault files first (in order)
 
-1. `/Users/daviddeppe/Documents/arcium-vault/00-index/INDEX.md` — vault structure and write rules
-2. `/Users/daviddeppe/Documents/arcium-vault/00-index/PROJECTS.md` — active project and folder
-3. `/Users/daviddeppe/Documents/arcium-vault/00-index/CONVERSATIONS.md` — last 2-3 session entries
-4. `/Users/daviddeppe/Documents/arcium-vault/02-projects/` — current project state and open tasks
-5. `/Users/daviddeppe/Documents/arcium-vault/00-index/GLOSSARY.md` — domain terms
+1. `/private/tmp/test-vault-scaffold/00-index/INDEX.md` — vault structure and write rules
+2. `/private/tmp/test-vault-scaffold/00-index/CONVERSATIONS.md` — last 2-3 session entries
+3. `/private/tmp/test-vault-scaffold/03-cohort-work/` — deliverables from completed cohort runs
+4. `/private/tmp/test-vault-scaffold/00-index/SCHEMA.md` — note types, frontmatter rules, naming conventions
 
 ---
 
@@ -41,7 +44,7 @@ After reading, briefly confirm:
 ## Step 3 — Follow vault write rules
 
 You may read any file in the vault freely. When writing:
-- Create new notes in `05-conversations/`, `06-findings/`, or `08-scratch/`
+- Create new notes in `05-sessions/`, `04-findings/`, or `06-scratch/`
 - Append to index files in `00-index/` (never overwrite)
 - Follow the schema in `00-index/SCHEMA.md` — all new files need valid frontmatter
 - Never delete, rename, or move existing files
@@ -54,7 +57,7 @@ You may read any file in the vault freely. When writing:
 ## Step 4 — At session end
 
 Run the session-close workflow:
-`/Users/daviddeppe/Documents/arcium-vault/03-agents/workflows/session-close.md`
+`/private/tmp/test-vault-scaffold/00-index/workflows/session-close.md`
 
 ---
 
@@ -62,7 +65,7 @@ Run the session-close workflow:
 
 ```
 ~/Documents/Programming Projects/arcium/     <- code lives here
-/Users/daviddeppe/Documents/arcium-vault/                                <- memory lives here
+/private/tmp/test-vault-scaffold/                                <- memory lives here
 ```
 
 ---
@@ -70,6 +73,9 @@ Run the session-close workflow:
 ## Key facts
 
 - MCP server: `arcium.mcp.server` — 12 tools across vault__* and projects__* namespaces
-- WAT Pipeline: 5 specialist agents (Team Lead, Architect, Engineer, Critic, Comms)
-- Skill files: `/Users/daviddeppe/Documents/arcium-vault/04-skills/`
-- Firm context: `/Users/daviddeppe/Documents/arcium-vault/01-firm-context/`
+- CAST manifests: `/private/tmp/test-vault-scaffold/02-marketplace/` — agents, skills, tools, cohorts
+- Marketplace registry: `/private/tmp/test-vault-scaffold/02-marketplace/_registry/index.json`
+- Firm context: `/private/tmp/test-vault-scaffold/01-firm-context/`
+- Cohort deliverables: `/private/tmp/test-vault-scaffold/03-cohort-work/<slug>/`
+- Agent reasoning logs: `/private/tmp/test-vault-scaffold/04-findings/`
+- Scratch work: `/private/tmp/test-vault-scaffold/06-scratch/cohort-<slug>/`
