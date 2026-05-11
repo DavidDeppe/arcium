@@ -44,7 +44,7 @@ def validate_vault_path(vault_root: Path, target_path: str) -> Path:
 
     Args:
         vault_root: Absolute path to vault root
-        target_path: Relative path from user (e.g., "06-findings/foo.md")
+        target_path: Relative path from user (e.g., "04-findings/foo.md")
 
     Returns:
         Resolved absolute path if valid
@@ -117,7 +117,7 @@ def vault__read_file(path: str) -> str:
     Read a file from the vault.
 
     Args:
-        path: Relative path from vault root (e.g., "06-findings/foo.md")
+        path: Relative path from vault root (e.g., "04-findings/foo.md")
 
     Returns:
         File contents as string
@@ -209,7 +209,7 @@ def vault__list_files(pattern: Optional[str] = None) -> List[str]:
     List files in the vault with optional glob pattern.
 
     Args:
-        pattern: Optional glob pattern (e.g., "**/*.md", "06-findings/*")
+        pattern: Optional glob pattern (e.g., "**/*.md", "04-findings/*")
                 If None, lists all files recursively
 
     Returns:

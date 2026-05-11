@@ -6,13 +6,88 @@ or ClaudeCodeAgent configurations to create specialist agents with specific role
 and capabilities.
 """
 
-from typing import Dict, List, Union, Literal
+import logging
+from typing import Dict, List, Union, Literal, Tuple, Optional
+import yaml
 from ..vault import VaultTools
 from ..projects import ProjectTools
 from ..agent.react import ReactAgent, VAULT_TOOLS, PROJECTS_TOOLS
 from ..agent.backend import AnthropicBackend, AgentResult
 from ..agent.claude_code_agent import ClaudeCodeAgent
 from ..config import get_config
+
+logger = logging.getLogger(__name__)
+
+
+class AgentNotFoundError(Exception):
+    """Raised when an agent file cannot be found at any known lookup path."""
+    pass
+
+
+class FrontmatterParseError(Exception):
+    """Raised when a vault file has malformed or invalid frontmatter."""
+    pass
+
+
+def _parse_frontmatter(content: str) -> Tuple[dict, str]:
+    """
+    Parse YAML frontmatter from a markdown file.
+
+    Returns (frontmatter_dict, body_string).
+
+    Raises FrontmatterParseError if frontmatter delimiters are present
+    but the YAML block is malformed. Files with no frontmatter return
+    ({}, full_content) — not an error.
+    """
+    if not content.startswith("---"):
+        return {}, content
+
+    end = content.find("\n---", 3)
+    if end == -1:
+        raise FrontmatterParseError(
+            "Frontmatter opening delimiter found but no closing '---'. "
+            "File is malformed — fix the frontmatter or remove the opening delimiter."
+        )
+
+    yaml_block = content[3:end].strip()
+    body = content[end + 4:].lstrip("\n")
+
+    try:
+        parsed = yaml.safe_load(yaml_block)
+    except yaml.YAMLError as e:
+        raise FrontmatterParseError(f"Malformed YAML frontmatter: {e}") from e
+
+    if parsed is None:
+        parsed = {}
+
+    if not isinstance(parsed, dict):
+        raise FrontmatterParseError(
+            f"Frontmatter parsed to {type(parsed).__name__}, expected dict. "
+            "Check that the YAML block is key:value pairs, not a bare scalar."
+        )
+
+    list_fields = ["reviewed_by", "approved_for_tiers", "default_skills",
+                   "default_tools", "suggested_tools", "tags"]
+    for field in list_fields:
+        if field in parsed and not isinstance(parsed[field], list):
+            raise FrontmatterParseError(
+                f"Field '{field}' must be a YAML list but parsed as "
+                f"{type(parsed[field]).__name__}: {parsed[field]!r}. "
+                f"Use YAML list syntax: [{field}: [value1, value2]]"
+            )
+
+    return parsed, body
+
+
+def _is_legacy_skill_file(frontmatter: dict) -> bool:
+    """
+    Returns True if this file uses the old SKILL.md format (pre-Phase 1).
+    Detection: old format uses 'type' key; new format uses 'kind' key.
+    When True, the runtime treats the file as a combined AGENT+SKILL and
+    composes the prompt using the full file body, identical to pre-Phase 1 behavior.
+    This shim is removed in Phase 3 when the registry resolver replaces skill_injector.
+    """
+    return "type" in frontmatter and "kind" not in frontmatter
 
 
 class SkillInjector:
@@ -67,8 +142,8 @@ with vault tools - the information is already available below.
 ---
 
 You may still use vault tools to:
-- Search for related past work in 05-conversations/ and 06-findings/
-- Read project-specific files in 02-projects/ or 08-scratch/
+- Search for related past work in 05-sessions/ and 04-findings/
+- Read project-specific files in 03-cohort-work/ or 06-scratch/
 - Read stakeholder information from 01-firm-context/STAKEHOLDERS.md if needed
 - Read any other vault files not listed above
 """
@@ -76,20 +151,69 @@ You may still use vault tools to:
         self.context_cache["firm_context"] = context
         return context
 
+    def _resolve_agent_path(self, agent_id: str) -> str:
+        """
+        Resolve a bare agent ID to its canonical vault path.
+
+        Callers pass a bare ID (e.g. "team-lead") or a full path within
+        02-marketplace/ (e.g. "02-marketplace/skills/vault-navigation.md"). The canonical
+        location for agents is 02-marketplace/agents/<id>.md.
+
+        Raises AgentNotFoundError if the file does not exist.
+        """
+        # Full paths (skills, etc.) are used as-is.
+        if "/" in agent_id:
+            canonical = agent_id
+        else:
+            canonical = f"02-marketplace/agents/{agent_id}.md"
+
+        try:
+            self.vault.read_file(canonical)
+            return canonical
+        except Exception:
+            raise AgentNotFoundError(
+                f"Agent file not found. id='{agent_id}' tried: '{canonical}'"
+            )
+
     def load_skill(self, skill_path: str) -> str:
         """
-        Load skill file from vault with caching.
+        Load skill/agent file from vault with caching.
+
+        Supports both legacy SKILL.md format (type: skill) and new AGENT.md
+        format (kind: agent). For new-format files, strips frontmatter so only
+        the markdown body is injected into the system prompt. For legacy files,
+        the full content (including frontmatter) is returned unchanged — identical
+        to pre-Phase 1 behavior.
 
         Args:
-            skill_path: Path to skill file in vault (e.g., "04-skills/team-lead.md")
+            skill_path: Bare agent ID (e.g. "team-lead") or full vault path (e.g. "02-marketplace/skills/vault-navigation.md")
 
         Returns:
-            Skill file content
+            Content to inject into the system prompt
         """
-        if skill_path not in self.skill_cache:
-            self.skill_cache[skill_path] = self.vault.read_file(skill_path)
+        if skill_path in self.skill_cache:
+            return self.skill_cache[skill_path]
 
-        return self.skill_cache[skill_path]
+        resolved_path = self._resolve_agent_path(skill_path)
+        raw_content = self.vault.read_file(resolved_path)
+
+        frontmatter, body = _parse_frontmatter(raw_content)
+
+        if _is_legacy_skill_file(frontmatter):
+            # Legacy format: inject full content unchanged (pre-Phase 1 behavior)
+            result = raw_content
+        else:
+            # New format (kind: agent or kind: skill): inject body only, drop frontmatter.
+            # Phase 3 resolver will replace this branch entirely.
+            logger.debug(
+                "New-format agent file loaded: %s (kind=%s)",
+                resolved_path,
+                frontmatter.get("kind", "unknown"),
+            )
+            result = body
+
+        self.skill_cache[skill_path] = result
+        return result
 
     def create_specialist_agent(
         self,

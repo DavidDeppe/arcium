@@ -1,11 +1,11 @@
 """
 arcium/agent/claude_code_agent.py
 
-Autonomous agent that executes tasks by delegating to Claude Code CLI in headless mode.
+Autonomous agent that executes tasks by delegating to Claude Code CLI in headless mode
+or directly via the Anthropic API, depending on the provider configured in arcium.config.yaml.
 
 Unlike ReactAgent (multi-turn loop with explicit tool orchestration), ClaudeCodeAgent
-makes ONE subprocess call and Claude Code handles the entire conversation internally
-including all tool executions.
+makes ONE call (subprocess or API) and returns the response.
 
 This is ideal for code generation tasks (Engineer, Critic roles) where:
 - Claude Code's native file editing is superior to API-based text replacement
@@ -20,6 +20,33 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+import yaml
+
+_DEFAULT_API_MODEL = "claude-sonnet-4-6"
+_ARCIUM_CONFIG_FILENAME = "arcium.config.yaml"
+
+
+class ConfigurationError(Exception):
+    """Raised for missing or invalid arcium.config.yaml settings."""
+    pass
+
+
+def _load_arcium_config() -> dict:
+    """
+    Load arcium.config.yaml from the project root (cwd or parents).
+
+    Returns the execution section as a dict. Falls back to defaults if the
+    file is missing so existing deployments are unaffected.
+    """
+    search = Path.cwd()
+    for directory in [search, *search.parents]:
+        candidate = directory / _ARCIUM_CONFIG_FILENAME
+        if candidate.exists():
+            with open(candidate) as f:
+                raw = yaml.safe_load(f) or {}
+            return raw.get("execution", {})
+    return {}
 
 
 @dataclass
@@ -44,7 +71,7 @@ class ClaudeCodeAgent:
     access to vault and projects directories. For production deployments, run
     this inside Docker containers for additional isolation.
 
-    See vault finding: 06-findings/claude-code-headless-security.md
+    See vault finding: 04-findings/claude-code-headless-security.md
     """
 
     def __init__(
@@ -61,8 +88,14 @@ class ClaudeCodeAgent:
             mcp_config_path: Path to .mcp.json config file
             vault_path: Path to Obsidian vault root
             projects_path: Path to projects directory
-            reasoning_log_dir: Directory to write reasoning logs (defaults to vault/06-findings/)
+            reasoning_log_dir: Directory to write reasoning logs (defaults to vault/04-findings/)
         """
+        # Load provider config from arcium.config.yaml (or defaults if file absent)
+        exec_cfg = _load_arcium_config()
+        self.provider = exec_cfg.get("provider", "claude_code")
+        self.model_cfg = exec_cfg.get("model", "default")
+        self.max_tokens = int(exec_cfg.get("max_tokens", 8192))
+
         # Load from environment with sensible defaults
         self.mcp_config_path = mcp_config_path or os.getenv(
             'ARCIUM_MCP_CONFIG',
@@ -82,14 +115,18 @@ class ClaudeCodeAgent:
         # Reasoning logs go to vault findings by default
         self.reasoning_log_dir = reasoning_log_dir or os.getenv(
             'ARCIUM_REASONING_LOG_DIR',
-            str(Path(self.vault_path) / '06-findings')
+            str(Path(self.vault_path) / '04-findings')
         )
 
-        # Validate paths
-        if not Path(self.mcp_config_path).exists():
+        # Validate paths (only needed for claude_code provider)
+        if self.provider == "claude_code" and not Path(self.mcp_config_path).exists():
             raise FileNotFoundError(f"MCP config not found: {self.mcp_config_path}")
 
         Path(self.reasoning_log_dir).mkdir(parents=True, exist_ok=True)
+
+        # Deferred import to avoid circular dependency (workflow -> agent -> workflow)
+        from arcium.workflow.tool_resolver import ToolManifestResolver
+        self.tool_resolver = ToolManifestResolver(vault_path=self.vault_path)
 
     def execute(
         self,
@@ -99,6 +136,7 @@ class ClaudeCodeAgent:
         poc_slug: Optional[str] = None,
         iteration: int = 1,
         timeout: int = 3600,  # 1 hour default
+        tools_filter: str = "all",
     ) -> ClaudeCodeResult:
         """
         Execute a task via Claude Code CLI.
@@ -123,13 +161,31 @@ class ClaudeCodeAgent:
             json.JSONDecodeError: If response is not valid JSON
             RuntimeError: If response contains is_error=true
         """
-        # Build command
+        if self.provider == "api":
+            return self._execute_api(task, system_prompt, role, poc_slug, iteration)
+
+        return self._execute_claude_code(task, system_prompt, role, poc_slug, iteration, timeout, tools_filter)
+
+    def _execute_claude_code(
+        self,
+        task: str,
+        system_prompt: str,
+        role: str,
+        poc_slug: Optional[str],
+        iteration: int,
+        timeout: int,
+        tools_filter: str = "all",
+    ) -> ClaudeCodeResult:
+        """Execute via claude --print subprocess (Claude Max CLI auth)."""
+        allowed_tools_args = self.tool_resolver.resolve_to_cli_args(tools_filter)
+
         # NOTE: --mcp-config MUST use equals sign syntax: --mcp-config=<path>
         cmd = [
             'claude',
             '--print',
             '--output-format', 'json',
             f'--mcp-config={self.mcp_config_path}',
+            *allowed_tools_args,
             '--system-prompt', system_prompt,
             '--dangerously-skip-permissions',  # Intentional - see class docstring
             task
@@ -178,6 +234,68 @@ class ClaudeCodeAgent:
             error=None
         )
 
+    def _execute_api(
+        self,
+        task: str,
+        system_prompt: str,
+        role: str,
+        poc_slug: Optional[str],
+        iteration: int,
+    ) -> ClaudeCodeResult:
+        """Execute via Anthropic SDK (requires ANTHROPIC_API_KEY env var)."""
+        import anthropic
+
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ConfigurationError(
+                "provider is set to 'api' but ANTHROPIC_API_KEY is not set.\n"
+                "Set the environment variable or switch provider to 'claude_code' "
+                "in arcium.config.yaml."
+            )
+
+        model = (
+            _DEFAULT_API_MODEL
+            if self.model_cfg == "default"
+            else self.model_cfg
+        )
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=model,
+            max_tokens=self.max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": task}],
+        )
+
+        result_text = response.content[0].text if response.content else ""
+        usage = {
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        }
+        # Approximate cost using Sonnet 4.6 pricing as baseline
+        cost = (response.usage.input_tokens * 3 + response.usage.output_tokens * 15) / 1_000_000
+
+        log_payload = json.dumps({
+            "provider": "api",
+            "model": model,
+            "role": role,
+            "result": result_text,
+            "usage": usage,
+            "total_cost_usd": cost,
+        }, indent=2)
+        if poc_slug:
+            self._save_reasoning_log(log_payload, role, poc_slug, iteration)
+
+        return ClaudeCodeResult(
+            success=True,
+            result=result_text,
+            session_id=f"api-{role}-{iteration}",
+            total_cost_usd=cost,
+            usage=usage,
+            raw_stdout=log_payload,
+            error=None
+        )
+
     def _save_reasoning_log(
         self,
         stdout: str,
@@ -195,7 +313,7 @@ class ClaudeCodeAgent:
             iteration: Iteration number
         """
         # Create PoC-specific findings directory
-        poc_findings_dir = Path(self.reasoning_log_dir) / f'poc-pipeline-{poc_slug}'
+        poc_findings_dir = Path(self.reasoning_log_dir) / f'cohort-{poc_slug}'
         poc_findings_dir.mkdir(parents=True, exist_ok=True)
 
         # Write log file with iteration and timestamp
@@ -212,6 +330,7 @@ class ClaudeCodeAgent:
         poc_slug: Optional[str] = None,
         iteration: int = 1,
         timeout: int = 3600,
+        tools_filter: str = "all",
     ) -> ClaudeCodeResult:
         """
         Execute with exception handling - returns ClaudeCodeResult with error field set.
@@ -219,7 +338,7 @@ class ClaudeCodeAgent:
         Same args as execute(), but catches exceptions and returns them in result.
         """
         try:
-            return self.execute(task, system_prompt, role, poc_slug, iteration, timeout)
+            return self.execute(task, system_prompt, role, poc_slug, iteration, timeout, tools_filter)
         except subprocess.TimeoutExpired as e:
             # Save partial output even on timeout
             if poc_slug and e.stdout:

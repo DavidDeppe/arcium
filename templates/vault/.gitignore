@@ -1,0 +1,7 @@
+# Personal vault identity — never commit, always copy from .vault-config.yaml.example
+.vault-config.yaml
+
+# Ephemeral vault content — not committed; generated at runtime
+05-sessions/
+06-scratch/
+99-archive/

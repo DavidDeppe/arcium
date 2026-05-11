@@ -1,0 +1,16 @@
+# This file defines the vault's identity and sync configuration.
+# Copy to .vault-config.yaml and fill in your values.
+# In production: provisioned by the Identity and Vault Provisioning Service.
+# For personal use: edit directly.
+
+vault_id: your-vault-id
+tier: personal
+parent: null              # Set to parent vault ID when federated
+
+sync:
+  frequency: daily
+  pull_from: []           # Populated when parent vault exists
+  push_to: []             # Populated when parent vault exists
+
+manages: []               # Vault IDs this user manages
+disseminate_to: []        # Vault IDs this user can push to
