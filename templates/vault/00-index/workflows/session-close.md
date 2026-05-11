@@ -7,105 +7,137 @@ tags: [workflow, session, memory, vault-librarian]
 
 # Workflow: Session Close
 
-Run this workflow at the end of every Claude session — in claude.ai or Claude Code — to persist what was learned into the vault so the next session can pick up without losing context.
+Run at the end of every session — in claude.ai or Claude Code — to persist what was learned so the next session picks up without losing context.
+
+**Before starting: Determine which environment you are in:**
+
+- **Claude Code** — MCP tools are available. Steps marked `[Claude Code]` use `vault__write_file` and `vault__read_file` directly.
+- **claude.ai** — No MCP access. Steps marked `[claude.ai]` require manual file creation by the user.
 
 ---
 
-## When to run
+## Step 1 — Generate the session summary
 
-- End of any productive claude.ai conversation
-- End of any Claude Code development session
-- Any time a significant decision, discovery, or design was reached
+_Same for both environments._
 
----
-
-## Steps
-
-### Step 1 — Generate the session summary
-
-Paste this prompt into the conversation before closing it:
+Ask Claude to generate a session summary using this prompt:
 
 ```
-Please write a session summary for my vault using this structure:
+Generate a session summary for the vault. Use this exact frontmatter format:
 
 ---
-type: conversation
-created: <today's date YYYY-MM-DD>
-updated: <today's date YYYY-MM-DD>
-project: <project slug>
-tags: [<relevant tags>]
+type: session
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+project: <primary project slug, or "arcium-platform" if this was a platform design session>
+tags: [<3-5 lowercase kebab-case tags describing what was discussed or built>]
 generated-by: claude
-session: <short descriptive title>
+session: <10-40 char kebab-case title summarizing the main work, e.g. "phase-4-vault-restructure">
 ---
 
-# <Session Title>
+Then write a concise body (150-300 words) covering:
+- What was the goal of this session?
+- What decisions were made or finalized?
+- What was built, changed, or fixed?
+- What is the next action or open question?
 
-## What we covered
-<3-5 bullet points of the main topics discussed>
-
-## Key decisions
-<Any architectural, design, or strategic decisions made — with the reasoning>
-
-## What was built or created
-<Files created, code written, structures designed>
-
-## Open threads
-<Unresolved questions or next steps that the next session should pick up>
-
-## How to pick up from here
-<A short paragraph a future Claude instance can read to get up to speed instantly>
+Do not include conversation transcripts. Facts and decisions only.
 ```
 
 ---
 
-### Step 2 — Save the summary to the vault
+## Step 2 — Save the session file
 
-Save the output as a new file:
+Filename convention: `YYYY-MM-DD-<session-title>.md` where `<session-title>` matches the `session:` frontmatter field exactly (already kebab-case, max 40 chars).
+
+Example: `2026-05-11-phase-4-vault-restructure.md`
+
+**[Claude Code]** Write directly to vault:
 ```
-05-sessions/YYYY-MM-DD-<session-title>.md
+vault__write_file("05-sessions/YYYY-MM-DD-<session-title>.md", <generated content>)
+```
+
+**[claude.ai]** Copy the generated content. In your file system, create:
+```
+~/Documents/arcium-vault/05-sessions/YYYY-MM-DD-<session-title>.md
+```
+Paste and save. **Do not skip this step — if the file is not saved, the session context is permanently lost.**
+
+---
+
+## Step 3 — Append to CONVERSATIONS.md
+
+Add one line to the session log in `00-index/CONVERSATIONS.md`. The file has a table at the top. Append a new row at the bottom of the table (before any trailing content):
+
+```markdown
+| YYYY-MM-DD | <session-title> | <one sentence: what was the primary outcome> |
 ```
 
 Example:
+```markdown
+| 2026-05-11 | phase-4-vault-restructure | Migrated all CAST artifacts to 02-marketplace/, built registry builder and Vault Sync Agent |
 ```
-05-sessions/2026-05-11-vault-restructure-phase-4.md
-```
+
+**[Claude Code]** Use `vault__read_file("00-index/CONVERSATIONS.md")` to read current content, append the row, then `vault__write_file` to save.
+
+**[claude.ai]** Open `~/Documents/arcium-vault/00-index/CONVERSATIONS.md` in a text editor. Append the row to the bottom of the table. Save.
 
 ---
 
-### Step 3 — Append to the conversation index
+## Step 4 — Verify audit logs (cohort sessions only)
 
-Open `00-index/CONVERSATIONS.md` and append this entry under **Sessions**:
+_Skip this step if no `arcium.workflow.cohort_coordinator` run occurred during this session._
+
+If one or more cohort runs occurred, verify both audit logs were written:
+
+**[Claude Code]**
+```
+vault__read_file("00-index/COHORT-RUNS.md")
+vault__read_file("00-index/COHORT-DECISIONS.md")
+```
+Confirm the most recent run appears in both files. If a run is missing, the `_vault_librarian()` call may have failed — check the coordinator output for errors.
+
+**[claude.ai]** Open both files and confirm the latest run appears:
+
+- `~/Documents/arcium-vault/00-index/COHORT-RUNS.md` — one row per run
+- `~/Documents/arcium-vault/00-index/COHORT-DECISIONS.md` — one entry per run with per-iteration decisions
+
+If either is missing an expected entry, the run record was lost. Note this in the session summary file under "open questions."
+
+---
+
+## Step 5 — Update project overview (conditional)
+
+_Skip this step if no active cohort project was worked on, or if the project has no `03-cohort-work/<slug>/overview.md` file._
+
+If a cohort project was advanced during this session and `03-cohort-work/<slug>/overview.md` exists, append a one-line status update:
 
 ```markdown
-### YYYY-MM-DD — <Session Title>
-- **Project**: <project slug>
-- **Agent**: direct chat | claude-code | <agent name>
-- **Key outcomes**: <one line summary>
-- **Open threads**: <one line on what's unresolved>
-- **Full summary**: [[05-sessions/YYYY-MM-DD-session-title]]
+**YYYY-MM-DD:** <what changed — one sentence>
 ```
+
+**[Claude Code]** Read the file first, then append.
+
+**[claude.ai]** Open the file and append manually.
+
+If the file does not exist, skip without creating it — overview files are created by the Communications Specialist during cohort execution, not manually.
 
 ---
 
-### Step 4 — Update the project file
+## What gets written automatically (no action needed)
 
-Open `03-cohort-work/<project-slug>/overview.md` and:
-- Check off any completed tasks
-- Update the `updated` frontmatter field to today
+When `CohortCoordinator` runs, `_vault_librarian()` automatically writes:
 
----
+- `00-index/COHORT-RUNS.md` — one row per completed run
+- `00-index/COHORT-DECISIONS.md` — full per-iteration decision log
 
-### Step 5 — Update INDEX.md vault health
-
-Open `00-index/INDEX.md` and update:
-```
-- Last agent session: <today's date>
-```
+These do not need to be written manually. Step 4 above only verifies they were written.
 
 ---
 
-## Automating this workflow (future)
+## Checklist
 
-Once the MCP file server is running, this entire workflow can be triggered by the `vault-librarian` agent automatically at session end — no manual copy-paste required. The agent reads the conversation context, generates the summary, and writes all three files in one shot.
-
-Until then, run it manually using the prompt in Step 1.
+- [ ] Session file saved to `05-sessions/`
+- [ ] Row appended to `00-index/CONVERSATIONS.md`
+- [ ] Audit logs verified (if cohort session)
+- [ ] Project overview updated (if applicable)
