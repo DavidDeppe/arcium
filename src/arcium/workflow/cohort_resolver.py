@@ -30,9 +30,9 @@ from .tool_resolver import ToolManifestResolver
 
 logger = logging.getLogger(__name__)
 
-_COHORTS_DIR = "00-firm/cohorts"
-_AGENTS_DIR = "00-firm/agents"
-_SKILLS_DIR = "00-firm/skills"
+_COHORTS_DIR = "02-marketplace/cohorts"
+_AGENTS_DIR = "02-marketplace/agents"
+_SKILLS_DIR = "02-marketplace/skills"
 
 
 class CohortNotFoundError(Exception):

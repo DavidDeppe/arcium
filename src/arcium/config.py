@@ -54,7 +54,7 @@ class ArciumConfig:
             ARCIUM_MCP_CONFIG: Path to .mcp.json (default: ./.mcp.json)
             ARCIUM_VAULT_PATH: Path to Obsidian vault (default: ~/Documents/arcium-vault)
             ARCIUM_PROJECTS_PATH: Path to projects directory (default: ~/projects)
-            ARCIUM_REASONING_LOG_DIR: Path to reasoning logs (default: <vault>/06-findings)
+            ARCIUM_REASONING_LOG_DIR: Path to reasoning logs (default: <vault>/04-findings)
             ANTHROPIC_API_KEY: Anthropic API key (optional)
             DEV_MODE: Use DEV mode (Haiku, lower cost limits) (default: false)
             ARCIUM_EXECUTION_MODE: Agent backend — "autonomous" (ClaudeCodeAgent) or "api" (ReactAgent) (default: autonomous)
@@ -80,10 +80,10 @@ class ArciumConfig:
             str(Path.home() / 'projects')
         )
 
-        # Reasoning log directory (defaults to vault/06-findings)
+        # Reasoning log directory (defaults to vault/04-findings)
         reasoning_log_dir = os.getenv(
             'ARCIUM_REASONING_LOG_DIR',
-            str(Path(vault_path) / '06-findings')
+            str(Path(vault_path) / '04-findings')
         )
 
         # API key

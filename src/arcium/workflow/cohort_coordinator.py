@@ -64,7 +64,7 @@ class CohortCoordinator:
                 Defaults to ARCIUM_EXECUTION_MODE env var, then "autonomous".
             verbose: Whether to log coordination progress
             cohort_id: Cohort manifest ID to load. Must match a COHORT.md file in
-                the vault's 00-firm/cohorts/ directory. Default: 'poc-generator'.
+                the vault's 02-marketplace/cohorts/ directory. Default: 'poc-generator'.
         """
         # Initialize vault
         if vault is None:
@@ -299,22 +299,22 @@ class CohortCoordinator:
         Create project folder structure.
 
         Creates:
-        - 08-scratch/cohort-<slug>/  (vault, markdown only)
+        - 06-scratch/cohort-<slug>/  (vault, markdown only)
         - ~/projects/<slug>/               (real code)
-        - 02-projects/<slug>/             (final deliverables, markdown)
+        - 03-cohort-work/<slug>/             (final deliverables, markdown)
         """
         if self.verbose:
             print(f"\n📁 Setting up project structure for: {poc_slug}")
 
         # Create scratch directory in vault
-        scratch_dir = f"08-scratch/cohort-{poc_slug}"
+        scratch_dir = f"06-scratch/cohort-{poc_slug}"
 
         # Create projects directory (real code, outside vault)
         project_dir = Path.home() / "projects" / poc_slug
         project_dir.mkdir(parents=True, exist_ok=True)
 
         # Create project folder in vault (deliverables)
-        deliverables_dir = f"02-projects/{poc_slug}"
+        deliverables_dir = f"03-cohort-work/{poc_slug}"
 
         # Create initial project overview
         overview_content = f"""---
@@ -347,7 +347,7 @@ PoC project managed by the WAT pipeline with five specialist agents.
 
 ## Links
 
-- Scratch work: [[08-scratch/cohort-{poc_slug}]]
+- Scratch work: [[06-scratch/cohort-{poc_slug}]]
 - Real code: `~/projects/{poc_slug}/`
 """
         self.vault.write_file(f"{deliverables_dir}/overview.md", overview_content)
@@ -405,8 +405,8 @@ Your Phase 1 tasks:
 1. Read 00-index/INDEX.md to orient in the vault
 2. Review the pre-loaded firm constraints and domain context (already in your system prompt)
 3. Read 01-firm-context/STAKEHOLDERS.md (if needed for stakeholder mapping)
-4. Search 05-conversations/ and 06-findings/ for related past work
-5. Check 02-projects/ for any active related projects
+4. Search 05-sessions/ and 04-findings/ for related past work
+5. Check 03-cohort-work/ for any active related projects
 
 Then write a comprehensive project brief to: {context.brief_path}
 
@@ -505,7 +505,7 @@ Read the project brief at: {context.brief_path}
 Your Phase 2 tasks:
 1. Read the brief completely
 2. Review the pre-loaded firm constraints and domain context (already in your system prompt)
-3. Search 06-findings/ for related architectural decisions (if relevant)
+3. Search 04-findings/ for related architectural decisions (if relevant)
 4. Design a production-viable architecture
 
 Write your complete architecture spec to: {spec_path}
@@ -1386,7 +1386,7 @@ When done, provide Final Answer with your spot-check verdict.
         Communications Specialist:
         - Reads all prior outputs
         - Generates stakeholder deliverables
-        - Writes to 02-projects/<slug>/
+        - Writes to 03-cohort-work/<slug>/
         """
         if self.verbose:
             print(f"\n{'='*80}")
@@ -1434,7 +1434,7 @@ When done, provide Final Answer with your spot-check verdict.
             verbose=self.verbose
         )
 
-        deliverables_dir = f"02-projects/{context.poc_slug}"
+        deliverables_dir = f"03-cohort-work/{context.poc_slug}"
 
         task = f"""
 You are the Communications Specialist. Execute Phase 5: Communications.
@@ -1720,7 +1720,7 @@ When done, provide Final Answer listing all deliverables created.
         Finalize project and return results.
         """
         # Update project overview
-        overview_path = f"02-projects/{context.poc_slug}/overview.md"
+        overview_path = f"03-cohort-work/{context.poc_slug}/overview.md"
         overview = self.vault.read_file(overview_path)
 
         # Update status
@@ -1739,12 +1739,12 @@ When done, provide Final Answer listing all deliverables created.
             "total_cost": context.total_cost,
             "iterations": context.iteration_count,
             "deliverables": {
-                "overview": f"02-projects/{context.poc_slug}/overview.md",
-                "executive_summary": f"02-projects/{context.poc_slug}/executive-summary.md",
-                "presentation_deck": f"02-projects/{context.poc_slug}/presentation-deck.md",
-                "position_paper": f"02-projects/{context.poc_slug}/position-paper.md",
-                "talking_points": f"02-projects/{context.poc_slug}/talking-points.md",
-                "faq": f"02-projects/{context.poc_slug}/faq.md",
+                "overview": f"03-cohort-work/{context.poc_slug}/overview.md",
+                "executive_summary": f"03-cohort-work/{context.poc_slug}/executive-summary.md",
+                "presentation_deck": f"03-cohort-work/{context.poc_slug}/presentation-deck.md",
+                "position_paper": f"03-cohort-work/{context.poc_slug}/position-paper.md",
+                "talking_points": f"03-cohort-work/{context.poc_slug}/talking-points.md",
+                "faq": f"03-cohort-work/{context.poc_slug}/faq.md",
             },
             "code": context.project_dir,
             "scratch": context.scratch_dir
@@ -1759,7 +1759,7 @@ When done, provide Final Answer listing all deliverables created.
             print(f"\nProject: {context.poc_slug}")
             print(f"Total Cost: ${context.total_cost:.2f}")
             print(f"Iterations: {context.iteration_count}")
-            print(f"\nDeliverables: 02-projects/{context.poc_slug}/")
+            print(f"\nDeliverables: 03-cohort-work/{context.poc_slug}/")
             print(f"Code: {context.project_dir}/")
             print(f"Scratch: {context.scratch_dir}/")
             print()
@@ -1868,7 +1868,7 @@ When done, provide Final Answer listing all deliverables created.
         Raises:
             FileNotFoundError: If the Architect spec does not exist for this slug
         """
-        scratch_dir = f"08-scratch/cohort-{poc_slug}"
+        scratch_dir = f"06-scratch/cohort-{poc_slug}"
         spec_path = f"{scratch_dir}/01-architect-spec.md"
         brief_path = f"{scratch_dir}/00-brief.md"
         project_dir = str(Path.home() / "projects" / poc_slug)

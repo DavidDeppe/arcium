@@ -13,8 +13,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_TOOLS_DIR = "00-firm/tools"
-_BUNDLES_FILE = "00-firm/tools/_bundles.yaml"
+_TOOLS_DIR = "02-marketplace/tools"
+_BUNDLES_FILE = "02-marketplace/tools/_bundles.yaml"
 
 
 class ToolResolverError(Exception):
@@ -26,8 +26,8 @@ class ToolManifestResolver:
     """
     Resolves tool bundle names to --allowedTools CLI argument lists.
 
-    Reads tool manifests from <vault_path>/00-firm/tools/ and the bundle
-    index from <vault_path>/00-firm/tools/_bundles.yaml.
+    Reads tool manifests from <vault_path>/02-marketplace/tools/ and the bundle
+    index from <vault_path>/02-marketplace/tools/_bundles.yaml.
 
     Each TOOL.md manifest's frontmatter `mcp.endpoints_allowed` field lists
     the MCP function names exposed by that tool. resolve() combines these
@@ -53,7 +53,7 @@ class ToolManifestResolver:
         if not bundles_path.exists():
             raise ToolResolverError(
                 f"Bundle index not found: {bundles_path}. "
-                "Expected file: 00-firm/tools/_bundles.yaml"
+                "Expected file: 02-marketplace/tools/_bundles.yaml"
             )
 
         with open(bundles_path) as f:

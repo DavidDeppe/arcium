@@ -83,7 +83,7 @@ VAULT_TOOLS = [
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path from vault root (e.g., '06-findings/foo.md')"
+                    "description": "Relative path from vault root (e.g., '04-findings/foo.md')"
                 }
             },
             "required": ["path"]
@@ -133,7 +133,7 @@ VAULT_TOOLS = [
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern (e.g., '**/*.md', '06-findings/*'). Omit for all files."
+                    "description": "Glob pattern (e.g., '**/*.md', '04-findings/*'). Omit for all files."
                 }
             },
             "required": []
@@ -528,7 +528,7 @@ verified: false
 """
 
         # Write to vault
-        filepath = f"06-findings/{date_str}-react-{task[:30].replace(' ', '-').lower()}.md"
+        filepath = f"04-findings/{date_str}-react-{task[:30].replace(' ', '-').lower()}.md"
         self.vault.write_file(filepath, content)
 
         return filepath

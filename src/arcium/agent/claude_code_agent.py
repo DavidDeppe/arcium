@@ -71,7 +71,7 @@ class ClaudeCodeAgent:
     access to vault and projects directories. For production deployments, run
     this inside Docker containers for additional isolation.
 
-    See vault finding: 06-findings/claude-code-headless-security.md
+    See vault finding: 04-findings/claude-code-headless-security.md
     """
 
     def __init__(
@@ -88,7 +88,7 @@ class ClaudeCodeAgent:
             mcp_config_path: Path to .mcp.json config file
             vault_path: Path to Obsidian vault root
             projects_path: Path to projects directory
-            reasoning_log_dir: Directory to write reasoning logs (defaults to vault/06-findings/)
+            reasoning_log_dir: Directory to write reasoning logs (defaults to vault/04-findings/)
         """
         # Load provider config from arcium.config.yaml (or defaults if file absent)
         exec_cfg = _load_arcium_config()
@@ -115,7 +115,7 @@ class ClaudeCodeAgent:
         # Reasoning logs go to vault findings by default
         self.reasoning_log_dir = reasoning_log_dir or os.getenv(
             'ARCIUM_REASONING_LOG_DIR',
-            str(Path(self.vault_path) / '06-findings')
+            str(Path(self.vault_path) / '04-findings')
         )
 
         # Validate paths (only needed for claude_code provider)

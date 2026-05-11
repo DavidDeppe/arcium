@@ -142,8 +142,8 @@ with vault tools - the information is already available below.
 ---
 
 You may still use vault tools to:
-- Search for related past work in 05-conversations/ and 06-findings/
-- Read project-specific files in 02-projects/ or 08-scratch/
+- Search for related past work in 05-sessions/ and 04-findings/
+- Read project-specific files in 03-cohort-work/ or 06-scratch/
 - Read stakeholder information from 01-firm-context/STAKEHOLDERS.md if needed
 - Read any other vault files not listed above
 """
@@ -156,8 +156,8 @@ You may still use vault tools to:
         Resolve a bare agent ID to its canonical vault path.
 
         Callers pass a bare ID (e.g. "team-lead") or a full path within
-        00-firm/ (e.g. "00-firm/skills/vault-navigation.md"). The canonical
-        location for agents is 00-firm/agents/<id>.md.
+        02-marketplace/ (e.g. "02-marketplace/skills/vault-navigation.md"). The canonical
+        location for agents is 02-marketplace/agents/<id>.md.
 
         Raises AgentNotFoundError if the file does not exist.
         """
@@ -165,7 +165,7 @@ You may still use vault tools to:
         if "/" in agent_id:
             canonical = agent_id
         else:
-            canonical = f"00-firm/agents/{agent_id}.md"
+            canonical = f"02-marketplace/agents/{agent_id}.md"
 
         try:
             self.vault.read_file(canonical)
@@ -186,7 +186,7 @@ You may still use vault tools to:
         to pre-Phase 1 behavior.
 
         Args:
-            skill_path: Bare agent ID (e.g. "team-lead") or full vault path (e.g. "00-firm/skills/vault-navigation.md")
+            skill_path: Bare agent ID (e.g. "team-lead") or full vault path (e.g. "02-marketplace/skills/vault-navigation.md")
 
         Returns:
             Content to inject into the system prompt
