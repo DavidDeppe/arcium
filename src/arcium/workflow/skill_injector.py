@@ -7,6 +7,7 @@ and capabilities.
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, List, Union, Literal, Tuple, Optional
 import yaml
 from ..vault import VaultTools
@@ -151,29 +152,50 @@ You may still use vault tools to:
         self.context_cache["firm_context"] = context
         return context
 
+    def _build_agent_index(self) -> dict:
+        """Walk 02-marketplace/agents/ recursively. Returns id→path dict."""
+        index = {}
+        agents_dir = Path(self.vault.vault_path) / "02-marketplace" / "agents"
+        if agents_dir.exists():
+            for path in agents_dir.rglob("*.md"):
+                try:
+                    fm, _ = _parse_frontmatter(path.read_text())
+                    if fm.get("kind") == "agent":
+                        agent_id = fm.get("id", path.stem)
+                        existing = index.get(agent_id)
+                        if existing is None or path.parent != agents_dir:
+                            index[agent_id] = path
+                except Exception:
+                    continue
+        return index
+
     def _resolve_agent_path(self, agent_id: str) -> str:
         """
         Resolve a bare agent ID to its canonical vault path.
 
-        Callers pass a bare ID (e.g. "team-lead") or a full path within
-        02-marketplace/ (e.g. "02-marketplace/skills/vault-navigation.md"). The canonical
-        location for agents is 02-marketplace/agents/<id>.md.
+        Searches recursively under 02-marketplace/agents/ using _build_agent_index.
+        Also accepts full vault-relative paths (e.g. "02-marketplace/skills/vault-navigation.md").
 
         Raises AgentNotFoundError if the file does not exist.
         """
-        # Full paths (skills, etc.) are used as-is.
         if "/" in agent_id:
-            canonical = agent_id
-        else:
-            canonical = f"02-marketplace/agents/{agent_id}.md"
+            try:
+                self.vault.read_file(agent_id)
+                return agent_id
+            except Exception:
+                raise AgentNotFoundError(
+                    f"Agent file not found at path: '{agent_id}'"
+                )
 
-        try:
-            self.vault.read_file(canonical)
-            return canonical
-        except Exception:
+        index = self._build_agent_index()
+        path = index.get(agent_id)
+        if path is None:
+            available = sorted(index.keys())
             raise AgentNotFoundError(
-                f"Agent file not found. id='{agent_id}' tried: '{canonical}'"
+                f"Agent '{agent_id}' not found in marketplace. "
+                f"Available: {available}"
             )
+        return str(path.relative_to(Path(self.vault.vault_path)))
 
     def load_skill(self, skill_path: str) -> str:
         """

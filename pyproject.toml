@@ -12,7 +12,12 @@ mcp = {extras = ["cli"], version = "^1.26.0"}
 anthropic = "^0.40.0"
 python-dotenv = "^1.0.0"
 pyyaml = "^6.0.3"
+rich = "^15.0.0"
+questionary = "^2.1.1"
 
+
+[tool.poetry.scripts]
+arcium = "arcium.__main__:main"
 
 [build-system]
 requires = ["poetry-core"]

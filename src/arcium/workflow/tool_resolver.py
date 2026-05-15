@@ -13,7 +13,6 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_TOOLS_DIR = "02-marketplace/tools"
 _BUNDLES_FILE = "02-marketplace/tools/_bundles.yaml"
 
 
@@ -39,44 +38,59 @@ class ToolManifestResolver:
     where <server> comes from each manifest's `mcp.server` frontmatter field.
     """
 
-    def __init__(self, vault_path: str):
+    def __init__(self, vault_path: str | Path, bundles_path: str | Path | None = None):
         self.vault_path = Path(vault_path)
         self._bundle_cache: dict = {}
         self._manifest_cache: dict = {}
+        tools_dir = self.vault_path / "02-marketplace" / "tools"
+
+        bundles_file = Path(bundles_path) if bundles_path else (self.vault_path / _BUNDLES_FILE)
+        if not bundles_file.exists():
+            raise ToolResolverError(f"Bundles file not found: {bundles_file}")
+        with open(bundles_file) as f:
+            data = yaml.safe_load(f) or {}
+        self._bundles = data.get("bundles", data)
+
+        # Build tool index: walk tools/**/*.md recursively
+        self._tool_index: dict[str, Path] = {}
+        if tools_dir.exists():
+            for path in tools_dir.rglob("*.md"):
+                if path.name == "README.md":
+                    continue
+                try:
+                    content = path.read_text()
+                    if not content.startswith("---"):
+                        continue
+                    end = content.find("\n---", 3)
+                    if end == -1:
+                        continue
+                    fm = yaml.safe_load(content[3:end].strip()) or {}
+                    if not isinstance(fm, dict):
+                        continue
+                    if fm.get("kind") == "tool":
+                        tool_id = fm.get("id", path.stem)
+                        existing = self._tool_index.get(tool_id)
+                        if existing is None or path.parent != tools_dir:
+                            self._tool_index[tool_id] = path
+                except Exception:
+                    continue
 
     def _load_bundles(self) -> dict:
-        """Load and cache _bundles.yaml."""
-        if self._bundle_cache:
-            return self._bundle_cache
-
-        bundles_path = self.vault_path / _BUNDLES_FILE
-        if not bundles_path.exists():
-            raise ToolResolverError(
-                f"Bundle index not found: {bundles_path}. "
-                "Expected file: 02-marketplace/tools/_bundles.yaml"
-            )
-
-        with open(bundles_path) as f:
-            raw = yaml.safe_load(f) or {}
-
-        bundles = raw.get("bundles", {})
-        if not bundles:
-            raise ToolResolverError(
-                f"_bundles.yaml loaded but contains no 'bundles' key: {bundles_path}"
-            )
-
-        self._bundle_cache = bundles
-        return bundles
+        """Return the pre-loaded bundles dict (loaded in __init__)."""
+        if not self._bundles:
+            raise ToolResolverError("Bundle index is empty — check _bundles.yaml")
+        return self._bundles
 
     def _load_manifest(self, tool_id: str) -> dict:
         """Load and cache a single TOOL.md manifest's frontmatter."""
         if tool_id in self._manifest_cache:
             return self._manifest_cache[tool_id]
 
-        manifest_path = self.vault_path / _TOOLS_DIR / f"{tool_id}.md"
-        if not manifest_path.exists():
+        manifest_path = self._tool_index.get(tool_id)
+        if manifest_path is None:
             raise ToolResolverError(
-                f"Tool manifest not found: {manifest_path} (tool id: '{tool_id}')"
+                f"Tool manifest not found for id '{tool_id}'. "
+                f"Available: {sorted(self._tool_index.keys())}"
             )
 
         content = manifest_path.read_text()

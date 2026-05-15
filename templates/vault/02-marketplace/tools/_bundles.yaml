@@ -1,0 +1,25 @@
+bundles:
+  vault_only:
+    description: "Read/write vault documentation — no code execution"
+    tools:
+      - vault-read
+      - vault-write
+      - vault-append
+      - vault-list
+      - vault-search
+
+  all:
+    description: "Full access — vault documentation + project code tools"
+    tools:
+      - vault-read
+      - vault-write
+      - vault-append
+      - vault-list
+      - vault-search
+      - projects-create-structure
+      - projects-write-file
+      - projects-read-file
+      - projects-list-files
+      - projects-check-syntax
+      - projects-check-dependencies
+      - projects-run-tests

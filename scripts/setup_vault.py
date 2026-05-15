@@ -33,11 +33,38 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates" / "vault"
 VAULT_FOLDERS = [
     "00-index/workflows",
     "01-firm-context",
-    "02-marketplace/agents",
-    "02-marketplace/skills",
-    "02-marketplace/tools",
+    # Marketplace — nested structure (Phase 5a)
     "02-marketplace/cohorts",
+    "02-marketplace/agents/leads",
+    "02-marketplace/agents/architects",
+    "02-marketplace/agents/developers",
+    "02-marketplace/agents/reviewers",
+    "02-marketplace/agents/communicators",
+    "02-marketplace/agents/specialists",
+    "02-marketplace/skills",
+    "02-marketplace/tools/vault",
+    "02-marketplace/tools/code",
     "02-marketplace/_registry",
+    "03-cohort-work",
+    "04-findings",
+    "05-sessions",
+    "06-scratch",
+    "07-sync-outbox",
+    "99-archive",
+]
+
+# Leaf directories that need .gitkeep so Git preserves them when empty
+_GITKEEP_DIRS = [
+    "02-marketplace/cohorts",
+    "02-marketplace/agents/leads",
+    "02-marketplace/agents/architects",
+    "02-marketplace/agents/developers",
+    "02-marketplace/agents/reviewers",
+    "02-marketplace/agents/communicators",
+    "02-marketplace/agents/specialists",
+    "02-marketplace/skills",
+    "02-marketplace/tools/vault",
+    "02-marketplace/tools/code",
     "03-cohort-work",
     "04-findings",
     "05-sessions",
@@ -113,12 +140,17 @@ def write_vault_config(vault_path: Path) -> None:
 
 
 def create_vault_structure(vault_path: Path) -> None:
-    """Create all vault folders."""
+    """Create all vault folders and .gitkeep files for empty leaf directories."""
     print(f"\nCreating vault at: {vault_path}")
     vault_path.mkdir(parents=True, exist_ok=True)
 
     for folder in VAULT_FOLDERS:
         (vault_path / folder).mkdir(parents=True, exist_ok=True)
+
+    for folder in _GITKEEP_DIRS:
+        gitkeep = vault_path / folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.touch()
 
     print("Vault folder structure created.")
 

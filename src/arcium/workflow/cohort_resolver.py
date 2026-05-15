@@ -30,10 +30,6 @@ from .tool_resolver import ToolManifestResolver
 
 logger = logging.getLogger(__name__)
 
-_COHORTS_DIR = "02-marketplace/cohorts"
-_AGENTS_DIR = "02-marketplace/agents"
-_SKILLS_DIR = "02-marketplace/skills"
-
 
 class CohortNotFoundError(Exception):
     """Raised when a COHORT.md file cannot be found."""
@@ -99,6 +95,98 @@ class CohortManifestResolver:
         self.vault_path = Path(vault_path)
         self.tool_resolver = ToolManifestResolver(vault_path=str(self.vault_path))
         self._manifest_cache: dict = {}
+        self._build_index()
+
+    # ------------------------------------------------------------------
+    # Index management
+    # ------------------------------------------------------------------
+
+    def _build_index(self) -> None:
+        """
+        Walk 02-marketplace at init time and build ID→path mappings.
+        Called once in __init__; call refresh_index() after adding artifacts.
+        """
+        marketplace = self.vault_path / "02-marketplace"
+
+        self._cohort_index: dict[str, Path] = {}
+        self._agent_index: dict[str, Path] = {}
+        self._skill_index: dict[str, Path] = {}
+        self._tool_index: dict[str, Path] = {}
+
+        # Cohorts: directory pattern <id>/<id>.md + flat backward compat
+        cohorts_dir = marketplace / "cohorts"
+        if cohorts_dir.exists():
+            for item in cohorts_dir.iterdir():
+                if item.is_dir():
+                    manifest = item / f"{item.name}.md"
+                    if manifest.exists():
+                        fm, _ = _parse_frontmatter(manifest.read_text())
+                        cohort_id = fm.get("id", item.name)
+                        self._cohort_index[cohort_id] = manifest
+                elif item.suffix == ".md":
+                    fm, _ = _parse_frontmatter(item.read_text())
+                    cohort_id = fm.get("id", item.stem)
+                    if cohort_id not in self._cohort_index:
+                        self._cohort_index[cohort_id] = item
+
+        # Agents: walk agents/**/*.md recursively
+        agents_dir = marketplace / "agents"
+        if agents_dir.exists():
+            for path in agents_dir.rglob("*.md"):
+                try:
+                    fm, _ = _parse_frontmatter(path.read_text())
+                    if fm.get("kind") == "agent":
+                        agent_id = fm.get("id", path.stem)
+                        # Prefer nested path over flat (nested wins on conflict)
+                        existing = self._agent_index.get(agent_id)
+                        if existing is None or path.parent != agents_dir:
+                            self._agent_index[agent_id] = path
+                except Exception:
+                    continue
+
+        # Skills: directory pattern SKILL.md + flat backward compat
+        skills_dir = marketplace / "skills"
+        if skills_dir.exists():
+            for path in skills_dir.rglob("SKILL.md"):
+                skill_id = path.parent.name
+                self._skill_index[skill_id] = path
+            for path in skills_dir.rglob("*.md"):
+                if path.name in ("SKILL.md", "README.md"):
+                    continue
+                try:
+                    fm, _ = _parse_frontmatter(path.read_text())
+                    if fm.get("kind") == "skill":
+                        skill_id = fm.get("id", path.stem)
+                        if skill_id not in self._skill_index:
+                            self._skill_index[skill_id] = path
+                except Exception:
+                    continue
+
+        # Tools: walk tools/**/*.md recursively
+        tools_dir = marketplace / "tools"
+        if tools_dir.exists():
+            for path in tools_dir.rglob("*.md"):
+                if path.name == "README.md":
+                    continue
+                try:
+                    fm, _ = _parse_frontmatter(path.read_text())
+                    if fm.get("kind") == "tool":
+                        tool_id = fm.get("id", path.stem)
+                        existing = self._tool_index.get(tool_id)
+                        if existing is None or path.parent != tools_dir:
+                            self._tool_index[tool_id] = path
+                except Exception:
+                    continue
+
+        logger.debug(
+            "Index built: %d cohorts, %d agents, %d skills, %d tools",
+            len(self._cohort_index), len(self._agent_index),
+            len(self._skill_index), len(self._tool_index),
+        )
+
+    def refresh_index(self) -> None:
+        """Rebuild the in-memory index. Call after adding new marketplace artifacts."""
+        self._build_index()
 
     # ------------------------------------------------------------------
     # Public API
@@ -121,11 +209,12 @@ class CohortManifestResolver:
         if cohort_id in self._manifest_cache:
             return self._manifest_cache[cohort_id]
 
-        manifest_path = self.vault_path / _COHORTS_DIR / f"{cohort_id}.md"
-        if not manifest_path.exists():
+        if cohort_id not in self._cohort_index:
             raise CohortNotFoundError(
-                f"Cohort manifest not found: {manifest_path} (cohort id: '{cohort_id}')"
+                f"Cohort '{cohort_id}' not found in marketplace. "
+                f"Available: {sorted(self._cohort_index.keys())}"
             )
+        manifest_path = self._cohort_index[cohort_id]
 
         raw = manifest_path.read_text()
         try:
@@ -298,10 +387,11 @@ class CohortManifestResolver:
 
     def _load_agent_body(self, agent_id: str) -> str:
         """Load AGENT.md body (frontmatter stripped)."""
-        agent_path = self.vault_path / _AGENTS_DIR / f"{agent_id}.md"
-        if not agent_path.exists():
-            raise CohortManifestError(
-                f"Agent file not found: {agent_path} (agent_id: '{agent_id}')"
+        agent_path = self._agent_index.get(agent_id)
+        if agent_path is None:
+            raise RoleNotFoundError(
+                f"Agent '{agent_id}' not found in marketplace. "
+                f"Available: {sorted(self._agent_index.keys())}"
             )
         raw = agent_path.read_text()
         _, body = _parse_frontmatter(raw)
@@ -309,10 +399,11 @@ class CohortManifestResolver:
 
     def _load_skill_body(self, skill_id: str) -> str:
         """Load SKILL.md body (frontmatter stripped)."""
-        skill_path = self.vault_path / _SKILLS_DIR / f"{skill_id}.md"
-        if not skill_path.exists():
+        skill_path = self._skill_index.get(skill_id)
+        if skill_path is None:
             raise CohortManifestError(
-                f"Skill file not found: {skill_path} (skill_id: '{skill_id}')"
+                f"Skill '{skill_id}' not found in marketplace. "
+                f"Available: {sorted(self._skill_index.keys())}"
             )
         raw = skill_path.read_text()
         _, body = _parse_frontmatter(raw)

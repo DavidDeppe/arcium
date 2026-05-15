@@ -44,60 +44,111 @@ def _sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _scan_marketplace(vault_path: Path) -> list:
+    """
+    Recursively scan 02-marketplace/ and return (kind, path) pairs.
+
+    Cohort manifests: cohorts/<id>/<id>.md (directory pattern) + flat backward compat
+    Agent manifests:  agents/**/*.md
+    Skill manifests:  skills/**/SKILL.md + skills/**/*.md (non-README)
+    Tool manifests:   tools/**/*.md (non-README, non-_bundles)
+    """
+    marketplace = vault_path / "02-marketplace"
+    artifacts = []
+
+    # Cohorts
+    cohorts_dir = marketplace / "cohorts"
+    if cohorts_dir.exists():
+        for item in sorted(cohorts_dir.iterdir()):
+            if item.is_dir():
+                manifest = item / f"{item.name}.md"
+                if manifest.exists():
+                    artifacts.append(("cohort", manifest))
+            elif item.suffix == ".md":
+                artifacts.append(("cohort", item))
+
+    # Agents (recursive)
+    agents_dir = marketplace / "agents"
+    if agents_dir.exists():
+        for path in sorted(agents_dir.rglob("*.md")):
+            artifacts.append(("agent", path))
+
+    # Skills: SKILL.md files first, then flat .md files
+    skills_dir = marketplace / "skills"
+    if skills_dir.exists():
+        for path in sorted(skills_dir.rglob("SKILL.md")):
+            artifacts.append(("skill", path))
+        for path in sorted(skills_dir.rglob("*.md")):
+            if path.name not in ("SKILL.md", "README.md"):
+                artifacts.append(("skill", path))
+
+    # Tools (recursive, skip _bundles.yaml and README.md)
+    tools_dir = marketplace / "tools"
+    if tools_dir.exists():
+        for path in sorted(tools_dir.rglob("*.md")):
+            if path.name != "README.md":
+                artifacts.append(("tool", path))
+
+    return artifacts
+
+
 def build_registry(vault_path: Path) -> dict:
     """
     Scan marketplace directories and build artifact index.
 
     Returns the complete index dict (not yet written to disk).
     """
-    marketplace = vault_path / "02-marketplace"
-
-    scan_dirs = [
-        marketplace / "agents",
-        marketplace / "skills",
-        marketplace / "tools",
-        marketplace / "cohorts",
-    ]
-
+    seen_ids: set[str] = set()
     artifacts: dict = {}
     counts: dict[str, int] = {}
+    family_counts: dict[str, dict[str, int]] = {}
 
-    for scan_dir in scan_dirs:
-        if not scan_dir.exists():
+    for _hint, md_file in _scan_marketplace(vault_path):
+        content = md_file.read_text(encoding="utf-8")
+        frontmatter, _ = _parse_frontmatter(content)
+
+        artifact_id = frontmatter.get("id")
+        version = frontmatter.get("version")
+        kind = frontmatter.get("kind")
+
+        if not artifact_id or not version or not kind:
             continue
 
-        for md_file in sorted(scan_dir.glob("*.md")):
-            content = md_file.read_text(encoding="utf-8")
-            frontmatter, _ = _parse_frontmatter(content)
+        key = f"{artifact_id}@{version}"
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
 
-            artifact_id = frontmatter.get("id")
-            version = frontmatter.get("version")
-            kind = frontmatter.get("kind")
+        rel_path = md_file.relative_to(vault_path).as_posix()
 
-            if not artifact_id or not version or not kind:
-                continue
+        # family = immediate parent dir name, None if it's the top-level category dir
+        parent_name = md_file.parent.name
+        top_level_dirs = {"agents", "skills", "tools", "cohorts"}
+        family = None if parent_name in top_level_dirs else parent_name
 
-            key = f"{artifact_id}@{version}"
-            # vault-relative path (forward slashes, no leading slash)
-            rel_path = md_file.relative_to(vault_path).as_posix()
+        entry = {
+            "id": artifact_id,
+            "version": str(version),
+            "kind": kind,
+            "family": family,
+            "tier": frontmatter.get("tier", "unknown"),
+            "description": frontmatter.get("description", ""),
+            "path": rel_path,
+            "sha256": _sha256(content),
+        }
 
-            entry = {
-                "id": artifact_id,
-                "version": str(version),
-                "kind": kind,
-                "tier": frontmatter.get("tier", "unknown"),
-                "description": frontmatter.get("description", ""),
-                "path": rel_path,
-                "sha256": _sha256(content),
-            }
+        artifacts[key] = entry
+        counts[kind] = counts.get(kind, 0) + 1
 
-            artifacts[key] = entry
-            counts[kind] = counts.get(kind, 0) + 1
+        if family:
+            if kind not in family_counts:
+                family_counts[kind] = {}
+            family_counts[kind][family] = family_counts[kind].get(family, 0) + 1
 
     return {
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         "artifacts": artifacts,
-    }, counts
+    }, counts, family_counts
 
 
 def write_registry(vault_path: Path, index: dict) -> Path:
@@ -111,13 +162,17 @@ def write_registry(vault_path: Path, index: dict) -> Path:
 
 
 def main(vault_path: Path) -> None:
-    index, counts = build_registry(vault_path)
+    index, counts, family_counts = build_registry(vault_path)
     out_path = write_registry(vault_path, index)
 
     total = sum(counts.values())
     print(f"Registry built: {total} artifacts")
     for kind in sorted(counts):
-        print(f"  {kind}: {counts[kind]}")
+        print(f"  {kind}: {counts[kind]}", end="")
+        if kind in family_counts:
+            families = ", ".join(f"{f}={n}" for f, n in sorted(family_counts[kind].items()))
+            print(f"  [{families}]", end="")
+        print()
     print(f"Output: {out_path}")
 
 
