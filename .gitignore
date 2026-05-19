@@ -45,3 +45,6 @@ config.local.json
 .env.local
 arcium.config.yaml
 arcium-test/
+
+# Runtime agent scratch output (agents write here when CWD is the code repo)
+06-scratch/

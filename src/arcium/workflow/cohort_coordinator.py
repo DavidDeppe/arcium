@@ -138,6 +138,10 @@ class CohortCoordinator:
             >>> print(result["status"])
             >>> print(result["deliverables"])
         """
+        # Non-poc-generator cohorts use the generic graph runner
+        if self.cohort_id != 'poc-generator':
+            return self._run_graph(poc_idea=poc_idea, poc_slug=poc_slug)
+
         try:
             # Setup project structure
             context = self._setup_project_structure(poc_slug)
@@ -1765,6 +1769,277 @@ When done, provide Final Answer listing all deliverables created.
             print()
 
         return result
+
+    # ------------------------------------------------------------------
+    # Generic graph runner (all non-poc-generator cohorts)
+    # ------------------------------------------------------------------
+
+    def _get_graph_output_path(
+        self,
+        node_index: int,
+        node_id: str,
+        poc_slug: str,
+    ) -> str:
+        """Return the vault-relative output path for a graph node."""
+        return f'06-scratch/cohort-{poc_slug}/{node_index:02d}-{node_id}.md'
+
+    def _get_graph_input_paths(
+        self,
+        node_index: int,
+        poc_slug: str,
+        graph_nodes: list,
+    ) -> list:
+        """Return vault-relative input paths for a node (all prior nodes' outputs)."""
+        if node_index == 0:
+            return []
+        return [
+            self._get_graph_output_path(i, graph_nodes[i].id, poc_slug)
+            for i in range(node_index)
+        ]
+
+    def _build_graph_task_prompt(
+        self,
+        node_id: str,
+        node_index: int,
+        total_nodes: int,
+        poc_idea: str,
+        poc_slug: str,
+        iteration: int,
+        input_paths: list,
+        output_path: str,
+        deliverables_path: Optional[str] = None,
+    ) -> str:
+        """Build the task prompt injected into each graph node's agent."""
+        if input_paths:
+            input_section = 'INPUT FILES — read these before doing anything:\n' + \
+                '\n'.join(f'  {p}' for p in input_paths)
+        else:
+            input_section = 'INPUT FILES — none (you are the entry node)'
+
+        deliverables_section = ''
+        if deliverables_path:
+            deliverables_section = (
+                f'\nDELIVERABLES PATH — write final deliverables here:\n'
+                f'  {deliverables_path}'
+            )
+
+        return f"""You are the {node_id} in the {self.cohort_id} cohort.
+
+PROJECT SLUG: {poc_slug}
+TASK/IDEA: {poc_idea}
+ITERATION: {iteration}
+YOUR POSITION: node {node_index + 1} of {total_nodes}
+
+{input_section}
+
+OUTPUT FILE — write your complete output here:
+  {output_path}
+{deliverables_section}
+
+Your output file MUST begin with YAML frontmatter in this exact format:
+---
+type: graph-output
+cohort: {self.cohort_id}
+node: {node_id}
+iteration: {iteration}
+route_to: <next-node-id or null if terminal>
+route_reason: <one sentence explaining your routing decision>
+status: complete
+---
+
+Everything below the closing --- is your domain content.
+Your agent instructions specify exactly what that content should contain.
+Follow them precisely."""
+
+    def _build_graph_context(
+        self,
+        poc_slug: str,
+        total_cost: float,
+        iteration: int,
+        outcome: str,
+    ) -> AgentContext:
+        """Build a minimal AgentContext for _vault_librarian()."""
+        scratch_dir = f'06-scratch/cohort-{poc_slug}'
+        project_dir = str(Path.home() / 'projects' / poc_slug)
+        ctx = AgentContext(
+            poc_slug=poc_slug,
+            scratch_dir=scratch_dir,
+            project_dir=project_dir,
+            brief_path=f'{scratch_dir}/00-brief.md',
+            current_phase=f'{self.cohort_id}-complete',
+            iteration_count=iteration,
+            total_cost=total_cost,
+            feedback_mode=False,
+        )
+        return ctx
+
+    def _run_graph(
+        self,
+        poc_idea: str,
+        poc_slug: str,
+    ) -> Dict[str, Any]:
+        """
+        Generic graph-walking coordinator for non-poc-generator cohorts.
+
+        Reads the cohort manifest graph, executes each node in sequence,
+        uses GraphExecutor for routing decisions after each node completes.
+        Preserves full vault-librarian, cost tracking, and COHORT-DECISIONS
+        audit trail — identical to poc-generator runs.
+        """
+        # Setup project structure (cohort-agnostic)
+        context = self._setup_project_structure(poc_slug)
+
+        graph_nodes = list(self._cohort_manifest.graph_nodes.values())
+        if not graph_nodes:
+            raise ValueError(
+                f"Cohort '{self.cohort_id}' has no graph nodes defined. "
+                "Add coordination.graph.nodes to the cohort manifest."
+            )
+
+        # Use self.graph_executor so _log_cohort_decisions() can read its routing log
+        self.graph_executor = GraphExecutor(
+            self._cohort_manifest, str(self.vault.vault_path)
+        )
+
+        node_index_map = {n.id: i for i, n in enumerate(graph_nodes)}
+        total_nodes = len(graph_nodes)
+        current_node_id: Optional[str] = graph_nodes[0].id
+        iteration = 1
+        self._decision_events = []
+
+        if self.verbose:
+            print(f"\n{'='*72}")
+            print(f"  {self.cohort_id.upper()} COHORT")
+            print(f"{'='*72}")
+            print(f"  Idea  : {poc_idea}")
+            print(f"  Slug  : {poc_slug}")
+            print(f"  Nodes : {' → '.join(n.id for n in graph_nodes)}")
+            print(f"{'='*72}\n")
+
+        while current_node_id is not None:
+            node_index = node_index_map[current_node_id]
+            current_node = graph_nodes[node_index]
+
+            if self.verbose:
+                print(f"\n{'─'*60}")
+                print(f"  NODE: {current_node_id}  (iteration {iteration})")
+                print(f"{'─'*60}")
+
+            # Compose system prompt from manifest (loads persona + skills)
+            system_prompt, tools_filter = self._cohort_resolver.compose_system_prompt(
+                self._cohort_manifest,
+                role=current_node_id,
+                cohort_context={
+                    'slug': poc_slug,
+                    'iteration': iteration,
+                    'cohort': self.cohort_id,
+                }
+            )
+
+            # Build paths and task prompt
+            input_paths = self._get_graph_input_paths(node_index, poc_slug, graph_nodes)
+            output_path = self._get_graph_output_path(node_index, current_node_id, poc_slug)
+            deliverables_path = f'03-cohort-work/{poc_slug}' if current_node.terminal else None
+
+            task_prompt = self._build_graph_task_prompt(
+                node_id=current_node_id,
+                node_index=node_index,
+                total_nodes=total_nodes,
+                poc_idea=poc_idea,
+                poc_slug=poc_slug,
+                iteration=iteration,
+                input_paths=input_paths,
+                output_path=output_path,
+                deliverables_path=deliverables_path,
+            )
+
+            # Create and execute agent
+            agent = self.injector.create_specialist_agent(
+                role=current_node_id,
+                skill_file=current_node_id,
+                tools_filter=tools_filter,
+                execution_mode=self.execution_mode,
+                api_key=self.api_key,
+                verbose=self.verbose,
+            )
+
+            result = self._execute_agent(
+                agent=agent,
+                task=task_prompt,
+                system_prompt=system_prompt,
+                role=current_node_id,
+                poc_slug=poc_slug,
+                iteration=iteration,
+                tools_filter=tools_filter,
+            )
+
+            node_cost = result.total_cost or 0.0
+            context.total_cost += node_cost
+
+            if self.verbose:
+                print(f"  ✓ {current_node_id} complete  ${node_cost:.4f}")
+
+            # Record decision event
+            self._record_decision(
+                iteration=iteration,
+                phase=current_node_id,
+                agent=current_node_id,
+                decision='COMPLETE',
+                detail=f'output: {output_path}',
+            )
+
+            # Resolve next node — pass absolute path to output file for frontmatter reading
+            abs_output = str(Path(self.vault.vault_path) / output_path)
+            verdict_path = abs_output if Path(abs_output).exists() else None
+
+            next_node_id = self.graph_executor.resolve_next_node(
+                current_node_id=current_node_id,
+                verdict_file_path=verdict_path,
+            )
+
+            if next_node_id == '__escalate__':
+                if self.verbose:
+                    print(f"\n  ⚠ Max iterations reached at {current_node_id} — escalating to human")
+                self._record_decision(
+                    iteration=iteration,
+                    phase=current_node_id,
+                    agent=current_node_id,
+                    decision='ESCALATE',
+                    detail='max_iterations reached',
+                )
+                ctx = self._build_graph_context(poc_slug, context.total_cost, iteration, 'escalated')
+                self._vault_librarian(ctx, 'escalated')
+                return {'status': 'escalated', 'cost': context.total_cost, 'slug': poc_slug}
+
+            # Detect back-routing (routing to an earlier node) → increment iteration
+            if next_node_id is not None:
+                next_index = node_index_map.get(next_node_id, 99)
+                if next_index < node_index:
+                    iteration += 1
+                    if self.verbose:
+                        print(f"  ↩ Routing back to {next_node_id} (iteration {iteration})")
+
+            current_node_id = next_node_id
+
+        # Completion
+        if self.verbose:
+            print(f"\n{'='*72}")
+            print(f"  ✅ {self.cohort_id.upper()} COHORT COORDINATION COMPLETE")
+            print(f"  Total Cost : ${context.total_cost:.4f}")
+            print(f"  Iterations : {iteration}")
+            print(f"{'='*72}\n")
+
+        ctx = self._build_graph_context(poc_slug, context.total_cost, iteration, 'completed')
+        self._vault_librarian(ctx, 'completed')
+
+        return {
+            'status': 'completed',
+            'cost': context.total_cost,
+            'iterations': iteration,
+            'slug': poc_slug,
+            'scratch': f'06-scratch/cohort-{poc_slug}',
+            'deliverables': f'03-cohort-work/{poc_slug}',
+        }
 
     # ------------------------------------------------------------------
     # Feedback iteration path
