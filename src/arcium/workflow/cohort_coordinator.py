@@ -1809,18 +1809,28 @@ When done, provide Final Answer listing all deliverables created.
         output_path: str,
         deliverables_path: Optional[str] = None,
     ) -> str:
-        """Build the task prompt injected into each graph node's agent."""
+        """Build the task prompt injected into each graph node's agent.
+
+        All paths are absolute vault paths so agents write to the correct
+        location regardless of their working directory.
+        """
+        vault_root = str(self.vault.vault_path)
+
         if input_paths:
+            abs_inputs = [f'{vault_root}/{p}' for p in input_paths]
             input_section = 'INPUT FILES — read these before doing anything:\n' + \
-                '\n'.join(f'  {p}' for p in input_paths)
+                '\n'.join(f'  {p}' for p in abs_inputs)
         else:
             input_section = 'INPUT FILES — none (you are the entry node)'
 
+        abs_output = f'{vault_root}/{output_path}'
+
         deliverables_section = ''
         if deliverables_path:
+            abs_deliverables = f'{vault_root}/{deliverables_path}'
             deliverables_section = (
                 f'\nDELIVERABLES PATH — write final deliverables here:\n'
-                f'  {deliverables_path}'
+                f'  {abs_deliverables}'
             )
 
         return f"""You are the {node_id} in the {self.cohort_id} cohort.
@@ -1833,7 +1843,7 @@ YOUR POSITION: node {node_index + 1} of {total_nodes}
 {input_section}
 
 OUTPUT FILE — write your complete output here:
-  {output_path}
+  {abs_output}
 {deliverables_section}
 
 Your output file MUST begin with YAML frontmatter in this exact format:
@@ -1907,6 +1917,10 @@ Follow them precisely."""
         iteration = 1
         self._decision_events = []
 
+        # Pre-create scratch directory so agents can write to it immediately
+        scratch_dir = Path(self.vault.vault_path) / f'06-scratch/cohort-{poc_slug}'
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+
         if self.verbose:
             print(f"\n{'='*72}")
             print(f"  {self.cohort_id.upper()} COHORT")
@@ -1975,6 +1989,21 @@ Follow them precisely."""
 
             node_cost = result.total_cost or 0.0
             context.total_cost += node_cost
+
+            # Surface agent errors and abort — don't silently continue past failures
+            if result.error and not result.success:
+                if self.verbose:
+                    print(f"  ✗ {current_node_id} failed: {result.error}")
+                self._record_decision(
+                    iteration=iteration,
+                    phase=current_node_id,
+                    agent=current_node_id,
+                    decision='ERROR',
+                    detail=(result.error[:100] if result.error else 'unknown error'),
+                )
+                ctx = self._build_graph_context(poc_slug, context.total_cost, iteration, 'error')
+                self._vault_librarian(ctx, 'error')
+                return {'status': 'error', 'node': current_node_id, 'error': result.error, 'cost': context.total_cost}
 
             if self.verbose:
                 print(f"  ✓ {current_node_id} complete  ${node_cost:.4f}")
